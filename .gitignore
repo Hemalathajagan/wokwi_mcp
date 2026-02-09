@@ -1,0 +1,25 @@
+# Python
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.db
+
+# Backend secrets
+backend/.env
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
