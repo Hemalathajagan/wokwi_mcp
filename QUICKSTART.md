@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-Get the Wokwi Circuit Analyzer running in 5 minutes.
+AI-powered fault detection for Wokwi circuits. Supports Arduino, ESP32, Raspberry Pi Pico, ATtiny85, STM32, wireless modules, and 14 popular libraries.
 
 ## Prerequisites
 
@@ -99,6 +99,25 @@ Frontend starts at `http://localhost:5173`.
 6. Check **History** to see past analyses
 7. Click **View Report** on any history entry to see the full fault report, circuit, code, and fix suggestions
 8. Visit **Profile** to change your password
+
+## What gets analyzed?
+
+### Supported Boards
+Arduino Uno, Mega, Nano, ESP32 DevKit V1, Raspberry Pi Pico, ATtiny85, STM32 Bluepill
+
+### Supported Wireless Modules
+HC-05, HC-06 (Bluetooth), HM-10 (BLE), ESP-01 (WiFi), nRF24L01 (RF), IR receiver/LED
+
+### Libraries Validated
+Servo, LiquidCrystal, LiquidCrystal_I2C, Wire, SPI, Adafruit_NeoPixel, DHT, SoftwareSerial, RF24, IRremote, Stepper, AccelStepper, Keypad, WiFi (ESP32)
+
+### Checks Performed
+- Wiring faults (missing connections, wrong pins, polarity errors)
+- Power issues (voltage mismatches, current budget, 3.3V/5V conflicts)
+- Code bugs (missing init calls, wrong pin modes, library misuse)
+- Code-circuit cross-reference (pin in code but not wired, and vice versa)
+- Board-specific issues (ESP32 flash pins, input-only pins, ATtiny pin limits)
+- Wireless issues (TX/RX crossover, baud rate, SPI mapping, serial conflicts)
 
 ## Running as MCP Server
 
