@@ -35,8 +35,17 @@ Analyze the circuit for these fault categories:
 - SPI pin conflicts
 - Analog read on digital-only pin
 
+### 5. Wireless Module Issues
+- TX/RX crossover: Bluetooth/WiFi module TX must connect to Arduino RX and vice versa (NOT TX→TX)
+- Voltage level mismatch: HC-05/HC-06 RXD is 3.3V logic — needs voltage divider from 5V Arduino
+- Power issues: ESP-01 draws 300mA peak (Arduino 3.3V pin only supplies 50mA), nRF24L01 is 3.3V only
+- Serial conflicts: Using hardware Serial pins 0/1 for wireless conflicts with USB upload/debug
+- SPI pin mapping: nRF24L01 must use correct SPI pins (SCK=13, MOSI=11, MISO=12 on Uno)
+- Missing pull-ups/enables: ESP-01 CH_PD must be pulled HIGH
+- Antenna considerations: nRF24L01 needs 10µF capacitor on VCC-GND for stability
+
 For each fault found, return a JSON object with these fields:
-- "category": one of "wiring", "component", "power", "signal"
+- "category": one of "wiring", "component", "power", "signal", "wireless"
 - "severity": "error" (will not work), "warning" (may cause issues), or "info" (best practice)
 - "component": the part ID(s) affected
 - "title": short description (one line)
@@ -83,6 +92,16 @@ Analyze for these categories:
 - Servo/I2C/SPI library used but corresponding hardware not in circuit
 - Wrong I2C address in code vs. component default
 
+### 7. Wireless Communication Code Issues
+- SoftwareSerial pin numbers don't match the wired Bluetooth/WiFi module pins
+- Missing #include <SoftwareSerial.h> when using Bluetooth/WiFi on non-hardware serial pins
+- Baud rate mismatch: SoftwareSerial.begin() baud rate doesn't match module default (HC-05: 38400, HC-06: 9600, ESP-01: 115200)
+- Missing RF24 library for nRF24L01 or wrong CE/CSN pin arguments
+- Missing IRremote library for IR receiver/transmitter
+- AT command issues: wrong format, missing line ending (\\r\\n), wrong baud for AT mode
+- Buffer overflow risks: not checking Serial.available() before Serial.read() for wireless data
+- WiFi code issues: missing WiFi.begin(), wrong SSID/password handling, no connection retry logic
+
 For each issue found, return a JSON object with:
 - "category": one of "code", "cross_reference"
 - "severity": "error", "warning", or "info"
@@ -120,6 +139,7 @@ Rules:
 - Explain every change you make
 - For wiring fixes, output a corrected connections array (not the full diagram.json)
 - For code fixes, output the complete corrected sketch
+- For wireless module fixes: suggest voltage dividers (1K + 2K resistors) for 3.3V RX protection, recommend SoftwareSerial over hardware Serial pins 0/1, suggest external 3.3V regulators for high-current modules like ESP-01
 
 Return a JSON object with:
 - "wiring_changes": [{"description": "what changed", "original": "old connection", "corrected": "new connection"}] or [] if no wiring changes

@@ -224,6 +224,119 @@ COMPONENT_PINS = {
         },
         "requires_power": False,
     },
+    # -----------------------------------------------------------------------
+    # Wireless modules
+    # -----------------------------------------------------------------------
+    "wokwi-hc-05": {
+        "pins": {
+            "VCC": {"type": "power_in"},
+            "GND": {"type": "ground_in"},
+            "TXD": {"type": "data_out"},
+            "RXD": {"type": "data_in"},
+            "EN": {"type": "digital"},
+            "STATE": {"type": "digital_out"},
+        },
+        "requires_power": True,
+        "operating_voltage": 3.3,
+        "power_voltage": 5.0,
+        "current_draw_ma": 50,
+        "protocol": "uart",
+        "default_baud": 38400,
+        "wireless_type": "bluetooth_classic",
+        "notes": "RXD is 3.3V logic — needs voltage divider from 5V Arduino TX. TX→RX crossover required. Default baud 38400 (AT mode: 38400).",
+    },
+    "wokwi-hc-06": {
+        "pins": {
+            "VCC": {"type": "power_in"},
+            "GND": {"type": "ground_in"},
+            "TXD": {"type": "data_out"},
+            "RXD": {"type": "data_in"},
+        },
+        "requires_power": True,
+        "operating_voltage": 3.3,
+        "power_voltage": 5.0,
+        "current_draw_ma": 40,
+        "protocol": "uart",
+        "default_baud": 9600,
+        "wireless_type": "bluetooth_classic",
+        "notes": "RXD is 3.3V logic — needs voltage divider from 5V Arduino TX. TX→RX crossover required. Default baud 9600.",
+    },
+    "wokwi-hm-10": {
+        "pins": {
+            "VCC": {"type": "power_in"},
+            "GND": {"type": "ground_in"},
+            "TXD": {"type": "data_out"},
+            "RXD": {"type": "data_in"},
+        },
+        "requires_power": True,
+        "operating_voltage": 3.3,
+        "current_draw_ma": 50,
+        "protocol": "uart",
+        "default_baud": 9600,
+        "wireless_type": "bluetooth_ble",
+        "notes": "BLE 4.0 module. 3.3V only — do NOT power from 5V. RXD needs 3.3V logic. Default baud 9600.",
+    },
+    "wokwi-esp01": {
+        "pins": {
+            "VCC": {"type": "power_in"},
+            "GND": {"type": "ground_in"},
+            "TX": {"type": "data_out"},
+            "RX": {"type": "data_in"},
+            "CH_PD": {"type": "digital", "notes": "Must be pulled HIGH to enable"},
+            "RST": {"type": "digital"},
+            "GPIO0": {"type": "digital"},
+            "GPIO2": {"type": "digital"},
+        },
+        "requires_power": True,
+        "operating_voltage": 3.3,
+        "current_draw_ma": 300,
+        "protocol": "uart",
+        "default_baud": 115200,
+        "wireless_type": "wifi",
+        "notes": "3.3V ONLY — NOT 5V tolerant. Draws up to 300mA peak (Arduino 3.3V pin can only supply 50mA). CH_PD must be pulled HIGH. TX→RX crossover required.",
+    },
+    "wokwi-nrf24l01": {
+        "pins": {
+            "VCC": {"type": "power_in"},
+            "GND": {"type": "ground_in"},
+            "CE": {"type": "digital"},
+            "CSN": {"type": "digital"},
+            "SCK": {"type": "spi_clock"},
+            "MOSI": {"type": "spi_data_in"},
+            "MISO": {"type": "spi_data_out"},
+            "IRQ": {"type": "digital_out"},
+        },
+        "requires_power": True,
+        "operating_voltage": 3.3,
+        "current_draw_ma": 115,
+        "protocol": "spi",
+        "wireless_type": "rf_2_4ghz",
+        "notes": "3.3V ONLY — connecting to 5V will damage the module. Add 10µF capacitor across VCC-GND for stability. SPI pins: SCK=13, MOSI=11, MISO=12 on Uno.",
+    },
+    "wokwi-ir-receiver": {
+        "pins": {
+            "VCC": {"type": "power_in"},
+            "GND": {"type": "ground_in"},
+            "OUT": {"type": "data_out"},
+        },
+        "requires_power": True,
+        "operating_voltage": 5.0,
+        "current_draw_ma": 5,
+        "wireless_type": "ir",
+        "notes": "Data pin should connect to an interrupt-capable pin (2 or 3 on Uno) for reliable IR decoding.",
+    },
+    "wokwi-ir-led": {
+        "pins": {
+            "A": {"type": "anode"},
+            "C": {"type": "cathode"},
+        },
+        "requires_power": True,
+        "needs_resistor": True,
+        "typical_resistor_ohms": 100,
+        "max_current_ma": 50,
+        "wireless_type": "ir",
+        "notes": "IR transmitter LED. Needs current-limiting resistor. Signal pin should be PWM-capable for 38kHz carrier generation.",
+    },
 }
 
 # Common wiring rules checked by the rule-based analyzer
@@ -264,6 +377,49 @@ WIRING_RULES = [
         "applies_to": ["wokwi-neopixel"],
         "severity": "warning",
     },
+    # Wireless module rules
+    {
+        "id": "bluetooth_tx_rx_crossover",
+        "description": "Bluetooth module TX must connect to Arduino RX and vice versa (TX→RX crossover)",
+        "applies_to": ["wokwi-hc-05", "wokwi-hc-06", "wokwi-hm-10"],
+        "severity": "error",
+    },
+    {
+        "id": "bluetooth_rx_voltage_divider",
+        "description": "HC-05/HC-06 RXD pin is 3.3V logic — needs voltage divider when connected to 5V Arduino TX",
+        "applies_to": ["wokwi-hc-05", "wokwi-hc-06"],
+        "severity": "warning",
+    },
+    {
+        "id": "esp01_power_requirements",
+        "description": "ESP-01 needs 3.3V and draws up to 300mA — cannot be powered from Arduino 3.3V pin (50mA max)",
+        "applies_to": ["wokwi-esp01"],
+        "severity": "error",
+    },
+    {
+        "id": "nrf24l01_spi_pins",
+        "description": "nRF24L01 SPI pins must connect to correct Arduino SPI pins (SCK=13, MOSI=11, MISO=12 on Uno)",
+        "applies_to": ["wokwi-nrf24l01"],
+        "severity": "error",
+    },
+    {
+        "id": "nrf24l01_voltage",
+        "description": "nRF24L01 is 3.3V only — connecting VCC to 5V will damage the module",
+        "applies_to": ["wokwi-nrf24l01"],
+        "severity": "error",
+    },
+    {
+        "id": "ir_receiver_interrupt_pin",
+        "description": "IR receiver data pin should connect to an interrupt-capable pin (2 or 3 on Uno) for reliable decoding",
+        "applies_to": ["wokwi-ir-receiver"],
+        "severity": "warning",
+    },
+    {
+        "id": "wireless_serial_conflict",
+        "description": "Using hardware Serial pins (0/1) for wireless modules conflicts with USB serial (upload/debug)",
+        "applies_to": ["wokwi-hc-05", "wokwi-hc-06", "wokwi-hm-10", "wokwi-esp01"],
+        "severity": "warning",
+    },
 ]
 
 # Arduino boards for identification
@@ -277,7 +433,18 @@ ARDUINO_BOARDS = {
 POWER_PIN_TYPES = {"power", "power_in", "power_out"}
 GROUND_PIN_TYPES = {"ground", "ground_in", "ground_out"}
 SIGNAL_PIN_TYPES = {"digital", "analog", "signal", "data", "data_in", "data_out",
-                    "digital_in", "digital_out", "analog_out", "i2c_data", "i2c_clock"}
+                    "digital_in", "digital_out", "analog_out", "i2c_data", "i2c_clock",
+                    "spi_clock", "spi_data_in", "spi_data_out"}
+
+# Components that use UART serial (TX/RX) communication
+UART_MODULES = {"wokwi-hc-05", "wokwi-hc-06", "wokwi-hm-10", "wokwi-esp01"}
+
+# Components that are 3.3V logic and NOT 5V tolerant
+THREE_V3_ONLY_MODULES = {"wokwi-hm-10", "wokwi-esp01", "wokwi-nrf24l01"}
+
+# Wireless module types
+WIRELESS_MODULES = {"wokwi-hc-05", "wokwi-hc-06", "wokwi-hm-10", "wokwi-esp01",
+                    "wokwi-nrf24l01", "wokwi-ir-receiver", "wokwi-ir-led"}
 
 
 def get_relevant_knowledge(part_types: list[str]) -> str:
@@ -298,6 +465,12 @@ def get_relevant_knowledge(part_types: list[str]) -> str:
                 line += f" | draws ~{info['current_draw_ma']}mA"
             if info.get("max_current_ma"):
                 line += f" | max {info['max_current_ma']}mA"
+            if info.get("operating_voltage"):
+                line += f" | operating voltage: {info['operating_voltage']}V"
+            if info.get("default_baud"):
+                line += f" | default baud: {info['default_baud']}"
+            if info.get("wireless_type"):
+                line += f" | wireless: {info['wireless_type']}"
             if info.get("notes"):
                 line += f"\n  Note: {info['notes']}"
             lines.append(line)

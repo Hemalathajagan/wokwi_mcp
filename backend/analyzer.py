@@ -16,6 +16,9 @@ from component_knowledge import (
     ARDUINO_BOARDS,
     POWER_PIN_TYPES,
     GROUND_PIN_TYPES,
+    UART_MODULES,
+    THREE_V3_ONLY_MODULES,
+    WIRELESS_MODULES,
     get_relevant_knowledge,
     get_pwm_pins,
     get_analog_pins,
@@ -524,6 +527,326 @@ def _check_serial_begin(sketch_code: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Wireless module checks
+# ---------------------------------------------------------------------------
+
+def _check_tx_rx_crossover(parts: list[dict], adjacency: dict) -> list[dict]:
+    """Check that UART wireless modules have TX→RX crossover wiring (not TX→TX)."""
+    faults = []
+    parts_map = {p["id"]: p for p in parts}
+
+    for part in parts:
+        ptype = part.get("type", "")
+        if ptype not in UART_MODULES:
+            continue
+        pid = part["id"]
+        comp_info = COMPONENT_PINS.get(ptype, {})
+
+        # Determine TX/RX pin names for this module
+        tx_pin = "TXD" if "TXD" in comp_info.get("pins", {}) else "TX"
+        rx_pin = "RXD" if "RXD" in comp_info.get("pins", {}) else "RX"
+
+        # Check TX connection — should go to an Arduino RX-like pin (0, or SoftwareSerial RX)
+        tx_key = f"{pid}:{tx_pin}"
+        for neighbor in adjacency.get(tx_key, []):
+            if ":" not in neighbor:
+                continue
+            npart_id, npin = neighbor.split(":", 1)
+            if npart_id not in parts_map:
+                continue
+            ntype = parts_map[npart_id].get("type", "")
+            # If module TX is connected to another module's TX = wrong
+            if ntype in UART_MODULES:
+                ncomp = COMPONENT_PINS.get(ntype, {})
+                n_tx = "TXD" if "TXD" in ncomp.get("pins", {}) else "TX"
+                if npin == n_tx:
+                    faults.append({
+                        "category": "wiring",
+                        "severity": "error",
+                        "component": pid,
+                        "title": f"TX-to-TX wiring on '{pid}' and '{npart_id}'",
+                        "explanation": f"Module '{pid}' TX is connected to '{npart_id}' TX. Serial communication requires TX→RX crossover (TX of one device to RX of the other).",
+                        "fix": {"type": "wiring", "description": f"Connect {pid}:{tx_pin} to {npart_id}'s RX pin, and {npart_id}'s TX to {pid}:{rx_pin}."},
+                    })
+            # If connected to Arduino pin 1 (TX), that's TX→TX
+            if ntype in ARDUINO_BOARDS and npin == "1":
+                faults.append({
+                    "category": "wiring",
+                    "severity": "error",
+                    "component": pid,
+                    "title": f"'{pid}' TX connected to Arduino TX (pin 1)",
+                    "explanation": f"Module '{pid}' TX is connected to Arduino pin 1 (TX). Both are transmitters — data will collide. TX should connect to RX.",
+                    "fix": {"type": "wiring", "description": f"Connect {pid}:{tx_pin} to Arduino pin 0 (RX), or use SoftwareSerial on different pins."},
+                })
+
+        # Check RX connection — should come from Arduino TX-like pin
+        rx_key = f"{pid}:{rx_pin}"
+        for neighbor in adjacency.get(rx_key, []):
+            if ":" not in neighbor:
+                continue
+            npart_id, npin = neighbor.split(":", 1)
+            if npart_id not in parts_map:
+                continue
+            ntype = parts_map[npart_id].get("type", "")
+            if ntype in ARDUINO_BOARDS and npin == "0":
+                faults.append({
+                    "category": "wiring",
+                    "severity": "error",
+                    "component": pid,
+                    "title": f"'{pid}' RX connected to Arduino RX (pin 0)",
+                    "explanation": f"Module '{pid}' RX is connected to Arduino pin 0 (RX). Both are receivers — neither is sending data. RX should connect to TX.",
+                    "fix": {"type": "wiring", "description": f"Connect {pid}:{rx_pin} to Arduino pin 1 (TX), or use SoftwareSerial on different pins."},
+                })
+
+    return faults
+
+
+def _check_wireless_voltage(parts: list[dict], adjacency: dict) -> list[dict]:
+    """Check that 3.3V-only wireless modules aren't connected to 5V power."""
+    faults = []
+    parts_map = {p["id"]: p for p in parts}
+
+    for part in parts:
+        ptype = part.get("type", "")
+        if ptype not in THREE_V3_ONLY_MODULES:
+            continue
+        pid = part["id"]
+
+        vcc_key = f"{pid}:VCC"
+        for neighbor in adjacency.get(vcc_key, []):
+            if ":" not in neighbor:
+                continue
+            npart_id, npin = neighbor.split(":", 1)
+            if npart_id not in parts_map:
+                continue
+            ntype = parts_map[npart_id].get("type", "")
+            if ntype in ARDUINO_BOARDS and npin == "5V":
+                faults.append({
+                    "category": "power",
+                    "severity": "error",
+                    "component": pid,
+                    "title": f"'{pid}' ({ptype}) connected to 5V — will be damaged",
+                    "explanation": f"Module '{pid}' is rated for 3.3V only. Connecting VCC to Arduino 5V can permanently damage the module.",
+                    "fix": {"type": "wiring", "description": f"Connect {pid} VCC to Arduino 3.3V pin. For ESP-01 (300mA draw), use an external 3.3V regulator — Arduino 3.3V pin can only supply 50mA."},
+                })
+
+    # Special check: ESP-01 powered from Arduino 3.3V pin (insufficient current)
+    for part in parts:
+        if part.get("type") != "wokwi-esp01":
+            continue
+        pid = part["id"]
+        vcc_key = f"{pid}:VCC"
+        for neighbor in adjacency.get(vcc_key, []):
+            if ":" not in neighbor:
+                continue
+            npart_id, npin = neighbor.split(":", 1)
+            if npart_id in parts_map and parts_map[npart_id].get("type") in ARDUINO_BOARDS and npin == "3.3V":
+                faults.append({
+                    "category": "power",
+                    "severity": "warning",
+                    "component": pid,
+                    "title": f"ESP-01 '{pid}' may not get enough current from Arduino 3.3V",
+                    "explanation": f"ESP-01 draws up to 300mA peak during WiFi transmission, but the Arduino 3.3V pin can only supply ~50mA. This can cause resets, connection drops, or failure to boot.",
+                    "fix": {"type": "wiring", "description": "Use an external 3.3V voltage regulator (e.g., AMS1117-3.3) capable of 500mA+ to power the ESP-01."},
+                })
+
+    return faults
+
+
+def _check_serial_pin_conflict(parts: list[dict], adjacency: dict) -> list[dict]:
+    """Warn when wireless modules use hardware Serial pins 0/1 (conflicts with USB)."""
+    faults = []
+    parts_map = {p["id"]: p for p in parts}
+
+    for part in parts:
+        ptype = part.get("type", "")
+        if ptype not in UART_MODULES:
+            continue
+        pid = part["id"]
+        comp_info = COMPONENT_PINS.get(ptype, {})
+        tx_pin = "TXD" if "TXD" in comp_info.get("pins", {}) else "TX"
+        rx_pin = "RXD" if "RXD" in comp_info.get("pins", {}) else "RX"
+
+        uses_hw_serial = False
+        for mod_pin in [tx_pin, rx_pin]:
+            key = f"{pid}:{mod_pin}"
+            for neighbor in adjacency.get(key, []):
+                if ":" not in neighbor:
+                    continue
+                npart_id, npin = neighbor.split(":", 1)
+                if npart_id in parts_map and parts_map[npart_id].get("type") in ARDUINO_BOARDS:
+                    if npin in ("0", "1"):
+                        uses_hw_serial = True
+
+        if uses_hw_serial:
+            faults.append({
+                "category": "signal",
+                "severity": "warning",
+                "component": pid,
+                "title": f"'{pid}' uses hardware Serial pins 0/1 — conflicts with USB",
+                "explanation": f"Module '{pid}' is connected to Arduino pins 0/1 (hardware Serial). This conflicts with USB communication — you won't be able to upload code or use Serial Monitor while the module is connected.",
+                "fix": {"type": "wiring", "description": f"Use SoftwareSerial on other pins (e.g., pins 2 and 3) instead of hardware Serial pins 0/1. Add #include <SoftwareSerial.h> to code."},
+            })
+
+    return faults
+
+
+def _check_spi_pins(parts: list[dict], adjacency: dict) -> list[dict]:
+    """Check nRF24L01 SPI pins are on correct Arduino SPI pins."""
+    faults = []
+    parts_map = {p["id"]: p for p in parts}
+    board_type = get_board_from_parts(parts)
+    if not board_type:
+        return faults
+
+    # SPI pin mapping per board
+    spi_pins = {
+        "wokwi-arduino-uno": {"SCK": "13", "MOSI": "11", "MISO": "12"},
+        "wokwi-arduino-nano": {"SCK": "13", "MOSI": "11", "MISO": "12"},
+        "wokwi-arduino-mega": {"SCK": "52", "MOSI": "51", "MISO": "50"},
+    }
+    expected = spi_pins.get(board_type, {})
+    if not expected:
+        return faults
+
+    for part in parts:
+        if part.get("type") != "wokwi-nrf24l01":
+            continue
+        pid = part["id"]
+
+        for spi_name, expected_pin in expected.items():
+            key = f"{pid}:{spi_name}"
+            for neighbor in adjacency.get(key, []):
+                if ":" not in neighbor:
+                    continue
+                npart_id, npin = neighbor.split(":", 1)
+                if npart_id in parts_map and parts_map[npart_id].get("type") in ARDUINO_BOARDS:
+                    if npin != expected_pin:
+                        faults.append({
+                            "category": "signal",
+                            "severity": "error",
+                            "component": pid,
+                            "title": f"nRF24L01 '{pid}' {spi_name} on wrong pin ({npin} instead of {expected_pin})",
+                            "explanation": f"nRF24L01 {spi_name} is connected to Arduino pin {npin}, but hardware SPI requires pin {expected_pin} on {board_type}.",
+                            "fix": {"type": "wiring", "description": f"Move {pid}:{spi_name} wire from pin {npin} to pin {expected_pin}."},
+                        })
+
+    return faults
+
+
+def _check_software_serial_pins(sketch_code: str, diagram: dict) -> list[dict]:
+    """Check SoftwareSerial pin assignments match circuit wiring."""
+    faults = []
+    parts = diagram.get("parts", [])
+    connections = diagram.get("connections", [])
+    board_type = get_board_from_parts(parts)
+    if not board_type:
+        return faults
+
+    board_ids = {p["id"] for p in parts if p.get("type") in ARDUINO_BOARDS}
+    wired_pins = set()
+    for conn in connections:
+        if len(conn) < 2:
+            continue
+        for endpoint in [conn[0], conn[1]]:
+            if ":" not in endpoint:
+                continue
+            part_id, pin = endpoint.split(":", 1)
+            if part_id in board_ids:
+                wired_pins.add(pin)
+
+    # Find SoftwareSerial constructor: SoftwareSerial name(rxPin, txPin)
+    ss_pattern = re.compile(r"SoftwareSerial\s+\w+\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)")
+    defines = _extract_defines_and_constants(sketch_code)
+
+    for m in ss_pattern.finditer(sketch_code):
+        rx_ref = m.group(1)
+        tx_ref = m.group(2)
+        rx_pin = defines.get(rx_ref, rx_ref)
+        tx_pin = defines.get(tx_ref, tx_ref)
+
+        for pin, label in [(rx_pin, "RX"), (tx_pin, "TX")]:
+            if (pin.isdigit() or pin.startswith("A")) and pin not in wired_pins:
+                faults.append({
+                    "category": "cross_reference",
+                    "severity": "warning",
+                    "component": f"SoftwareSerial {label} pin {pin}",
+                    "title": f"SoftwareSerial {label} pin {pin} not wired to any module",
+                    "explanation": f"Code defines SoftwareSerial with {label} on pin {pin}, but this pin has no connection in the circuit. The wireless module won't communicate.",
+                    "fix": {"type": "both", "description": f"Wire the wireless module's {'TXD/TX' if label == 'RX' else 'RXD/RX'} pin to Arduino pin {pin}."},
+                })
+
+    return faults
+
+
+def _check_wireless_library_usage(sketch_code: str, diagram: dict) -> list[dict]:
+    """Check for wireless library usage without matching hardware and vice versa."""
+    faults = []
+    parts = diagram.get("parts", [])
+    part_types = {p.get("type", "") for p in parts}
+
+    has_uart_module = bool(part_types & UART_MODULES)
+    has_nrf = "wokwi-nrf24l01" in part_types
+    has_ir_rx = "wokwi-ir-receiver" in part_types
+    has_ir_tx = "wokwi-ir-led" in part_types
+
+    has_ss_include = bool(re.search(r"#include\s*<SoftwareSerial\.h>", sketch_code))
+    has_ss_usage = bool(re.search(r"SoftwareSerial\s+\w+", sketch_code))
+    has_nrf_lib = bool(re.search(r"#include\s*<(RF24|nRF24L01)\.h>", sketch_code))
+    has_ir_lib = bool(re.search(r"#include\s*<IR(remote|recv).*\.h>", sketch_code))
+    has_wifi_lib = bool(re.search(r"#include\s*<(ESP8266WiFi|WiFi)\.h>", sketch_code))
+
+    # UART module in circuit but no SoftwareSerial or Serial usage for it
+    if has_uart_module and not has_ss_usage:
+        # Check if using hardware Serial (acceptable but warn-worthy)
+        has_serial = bool(re.search(r"Serial\.(begin|print|read|write|available)", sketch_code))
+        if not has_serial:
+            faults.append({
+                "category": "cross_reference",
+                "severity": "warning",
+                "component": "wireless",
+                "title": "UART wireless module in circuit but no serial communication in code",
+                "explanation": "A Bluetooth/WiFi module is wired but the code doesn't use Serial or SoftwareSerial to communicate with it.",
+                "fix": {"type": "code", "description": "Add #include <SoftwareSerial.h> and create a SoftwareSerial instance for the module, or use Serial if connected to pins 0/1."},
+            })
+
+    # nRF24L01 in circuit but no RF24 library
+    if has_nrf and not has_nrf_lib:
+        faults.append({
+            "category": "cross_reference",
+            "severity": "warning",
+            "component": "wireless",
+            "title": "nRF24L01 in circuit but RF24 library not included",
+            "explanation": "An nRF24L01 module is wired but the code doesn't include the RF24 library needed to communicate with it.",
+            "fix": {"type": "code", "description": "Add #include <RF24.h> and #include <nRF24L01.h>, then create an RF24 instance with CE and CSN pins."},
+        })
+
+    # IR receiver in circuit but no IRremote library
+    if (has_ir_rx or has_ir_tx) and not has_ir_lib:
+        faults.append({
+            "category": "cross_reference",
+            "severity": "warning",
+            "component": "wireless",
+            "title": "IR component in circuit but IRremote library not included",
+            "explanation": "An IR receiver or transmitter is wired but the code doesn't include the IRremote library.",
+            "fix": {"type": "code", "description": "Add #include <IRremote.h> and set up IR send/receive objects."},
+        })
+
+    # SoftwareSerial in code but no UART module
+    if has_ss_usage and not has_uart_module:
+        faults.append({
+            "category": "cross_reference",
+            "severity": "info",
+            "component": "wireless",
+            "title": "SoftwareSerial in code but no UART wireless module in circuit",
+            "explanation": "Code uses SoftwareSerial but there's no Bluetooth/WiFi module in the circuit to communicate with.",
+            "fix": {"type": "both", "description": "Add the wireless module to the circuit, or remove SoftwareSerial if not needed."},
+        })
+
+    return faults
+
+
+# ---------------------------------------------------------------------------
 # Main analysis functions
 # ---------------------------------------------------------------------------
 
@@ -540,6 +863,11 @@ def analyze_wiring_rules(diagram: dict) -> list[dict]:
     faults.extend(_check_led_resistor(parts, adjacency))
     faults.extend(_check_power_connections(parts, adjacency))
     faults.extend(_check_servo_pwm(parts, adjacency))
+    # Wireless checks
+    faults.extend(_check_tx_rx_crossover(parts, adjacency))
+    faults.extend(_check_wireless_voltage(parts, adjacency))
+    faults.extend(_check_serial_pin_conflict(parts, adjacency))
+    faults.extend(_check_spi_pins(parts, adjacency))
     return faults
 
 
@@ -552,6 +880,9 @@ def analyze_code_rules(sketch_code: str, diagram: dict) -> list[dict]:
     faults.extend(_check_code_wiring_mismatch(sketch_code, diagram))
     faults.extend(_check_missing_pinmode(sketch_code))
     faults.extend(_check_serial_begin(sketch_code))
+    # Wireless code checks
+    faults.extend(_check_software_serial_pins(sketch_code, diagram))
+    faults.extend(_check_wireless_library_usage(sketch_code, diagram))
     return faults
 
 
