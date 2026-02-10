@@ -12,8 +12,8 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret_key: str = "CHANGE-ME-to-a-random-secret-string-at-least-32-chars"
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 15
-    refresh_token_expire_days: int = 7
+    access_token_expire_minutes: int = 60  # 1 hour
+    refresh_token_expire_days: int = 30  # 30 days
 
     # Google OAuth
     google_client_id: str = ""
