@@ -13,11 +13,12 @@ import openai
 
 from component_knowledge import (
     COMPONENT_PINS,
-    ARDUINO_BOARDS,
+    SUPPORTED_BOARDS,
     POWER_PIN_TYPES,
     GROUND_PIN_TYPES,
     UART_MODULES,
     THREE_V3_ONLY_MODULES,
+    THREE_V3_BOARDS,
     WIRELESS_MODULES,
     get_relevant_knowledge,
     get_pwm_pins,
@@ -150,7 +151,7 @@ def _check_unconnected_parts(parts: list[dict], connected_parts: set) -> list[di
     for part in parts:
         pid = part.get("id", "")
         ptype = part.get("type", "")
-        if ptype in ARDUINO_BOARDS:
+        if ptype in SUPPORTED_BOARDS:
             continue  # Board is always "connected"
         if pid not in connected_parts:
             faults.append({
@@ -271,7 +272,7 @@ def _check_led_resistor(parts: list[dict], adjacency: dict) -> list[dict]:
                     if ":" not in neighbor:
                         continue
                     npart_id = neighbor.split(":")[0]
-                    if npart_id in parts_map and parts_map[npart_id].get("type") in ARDUINO_BOARDS:
+                    if npart_id in parts_map and parts_map[npart_id].get("type") in SUPPORTED_BOARDS:
                         faults.append({
                             "category": "wiring",
                             "severity": "error",
@@ -351,7 +352,7 @@ def _check_servo_pwm(parts: list[dict], adjacency: dict) -> list[dict]:
             if ":" not in neighbor:
                 continue
             npart_id, npin = neighbor.split(":", 1)
-            if npart_id in parts_map and parts_map[npart_id].get("type") in ARDUINO_BOARDS:
+            if npart_id in parts_map and parts_map[npart_id].get("type") in SUPPORTED_BOARDS:
                 if npin not in pwm_pins:
                     faults.append({
                         "category": "signal",
@@ -421,7 +422,7 @@ def _check_code_wiring_mismatch(sketch_code: str, diagram: dict) -> list[dict]:
         return faults
 
     # Find which Arduino pins are wired
-    board_ids = {p["id"] for p in parts if p.get("type") in ARDUINO_BOARDS}
+    board_ids = {p["id"] for p in parts if p.get("type") in SUPPORTED_BOARDS}
     wired_pins = set()
     for conn in connections:
         if len(conn) < 2:
@@ -569,7 +570,7 @@ def _check_tx_rx_crossover(parts: list[dict], adjacency: dict) -> list[dict]:
                         "fix": {"type": "wiring", "description": f"Connect {pid}:{tx_pin} to {npart_id}'s RX pin, and {npart_id}'s TX to {pid}:{rx_pin}."},
                     })
             # If connected to Arduino pin 1 (TX), that's TX→TX
-            if ntype in ARDUINO_BOARDS and npin == "1":
+            if ntype in SUPPORTED_BOARDS and npin == "1":
                 faults.append({
                     "category": "wiring",
                     "severity": "error",
@@ -588,7 +589,7 @@ def _check_tx_rx_crossover(parts: list[dict], adjacency: dict) -> list[dict]:
             if npart_id not in parts_map:
                 continue
             ntype = parts_map[npart_id].get("type", "")
-            if ntype in ARDUINO_BOARDS and npin == "0":
+            if ntype in SUPPORTED_BOARDS and npin == "0":
                 faults.append({
                     "category": "wiring",
                     "severity": "error",
@@ -620,7 +621,7 @@ def _check_wireless_voltage(parts: list[dict], adjacency: dict) -> list[dict]:
             if npart_id not in parts_map:
                 continue
             ntype = parts_map[npart_id].get("type", "")
-            if ntype in ARDUINO_BOARDS and npin == "5V":
+            if ntype in SUPPORTED_BOARDS and npin == "5V":
                 faults.append({
                     "category": "power",
                     "severity": "error",
@@ -640,7 +641,7 @@ def _check_wireless_voltage(parts: list[dict], adjacency: dict) -> list[dict]:
             if ":" not in neighbor:
                 continue
             npart_id, npin = neighbor.split(":", 1)
-            if npart_id in parts_map and parts_map[npart_id].get("type") in ARDUINO_BOARDS and npin == "3.3V":
+            if npart_id in parts_map and parts_map[npart_id].get("type") in SUPPORTED_BOARDS and npin == "3.3V":
                 faults.append({
                     "category": "power",
                     "severity": "warning",
@@ -674,7 +675,7 @@ def _check_serial_pin_conflict(parts: list[dict], adjacency: dict) -> list[dict]
                 if ":" not in neighbor:
                     continue
                 npart_id, npin = neighbor.split(":", 1)
-                if npart_id in parts_map and parts_map[npart_id].get("type") in ARDUINO_BOARDS:
+                if npart_id in parts_map and parts_map[npart_id].get("type") in SUPPORTED_BOARDS:
                     if npin in ("0", "1"):
                         uses_hw_serial = True
 
@@ -720,7 +721,7 @@ def _check_spi_pins(parts: list[dict], adjacency: dict) -> list[dict]:
                 if ":" not in neighbor:
                     continue
                 npart_id, npin = neighbor.split(":", 1)
-                if npart_id in parts_map and parts_map[npart_id].get("type") in ARDUINO_BOARDS:
+                if npart_id in parts_map and parts_map[npart_id].get("type") in SUPPORTED_BOARDS:
                     if npin != expected_pin:
                         faults.append({
                             "category": "signal",
@@ -743,7 +744,7 @@ def _check_software_serial_pins(sketch_code: str, diagram: dict) -> list[dict]:
     if not board_type:
         return faults
 
-    board_ids = {p["id"] for p in parts if p.get("type") in ARDUINO_BOARDS}
+    board_ids = {p["id"] for p in parts if p.get("type") in SUPPORTED_BOARDS}
     wired_pins = set()
     for conn in connections:
         if len(conn) < 2:
@@ -847,6 +848,129 @@ def _check_wireless_library_usage(sketch_code: str, diagram: dict) -> list[dict]
 
 
 # ---------------------------------------------------------------------------
+# Board-specific checks
+# ---------------------------------------------------------------------------
+
+def _check_esp32_flash_pins(parts: list[dict], connections: list) -> list[dict]:
+    """Check that ESP32 GPIO6-11 (flash pins) are not used in connections."""
+    faults = []
+    board_type = get_board_from_parts(parts)
+    if board_type != "wokwi-esp32-devkit-v1":
+        return faults
+
+    board_ids = {p["id"] for p in parts if p.get("type") == board_type}
+    flash_pins = {"6", "7", "8", "9", "10", "11"}
+
+    for conn in connections:
+        if len(conn) < 2:
+            continue
+        for endpoint in [conn[0], conn[1]]:
+            if ":" not in endpoint:
+                continue
+            part_id, pin = endpoint.split(":", 1)
+            if part_id in board_ids and pin in flash_pins:
+                faults.append({
+                    "category": "signal",
+                    "severity": "error",
+                    "component": f"GPIO{pin}",
+                    "title": f"ESP32 GPIO{pin} is a flash pin — do not use",
+                    "explanation": f"GPIO{pin} is internally connected to the SPI flash memory on ESP32. Using it for external connections will crash the chip or corrupt flash.",
+                    "fix": {"type": "wiring", "description": f"Move the wire from GPIO{pin} to a different GPIO (e.g., GPIO13-33, avoiding 34-39 for output)."},
+                })
+
+    return faults
+
+
+def _check_esp32_input_only(parts: list[dict], sketch_code: str, connections: list) -> list[dict]:
+    """Check that ESP32 input-only pins (34, 35, 36, 39) aren't used for output."""
+    faults = []
+    board_type = get_board_from_parts(parts)
+    if board_type != "wokwi-esp32-devkit-v1":
+        return faults
+
+    input_only = {"34", "35", "36", "39"}
+
+    if not sketch_code:
+        return faults
+
+    # Check for pinMode(pin, OUTPUT) or digitalWrite/analogWrite on input-only pins
+    defines = _extract_defines_and_constants(sketch_code)
+    pin_usage = _extract_pin_usage_from_code(sketch_code)
+
+    for ref, calls in pin_usage.items():
+        resolved = defines.get(ref, ref)
+        if resolved not in input_only:
+            continue
+        for func, line in calls:
+            if func in ("digitalWrite", "analogWrite", "tone"):
+                faults.append({
+                    "category": "signal",
+                    "severity": "error",
+                    "component": f"GPIO{resolved}",
+                    "title": f"ESP32 GPIO{resolved} is input-only — cannot use {func}()",
+                    "explanation": f"GPIO{resolved} on ESP32 has no output driver. {func}() at line {line} will have no effect. Input-only pins: 34, 35, 36, 39.",
+                    "fix": {"type": "both", "description": f"Move to a GPIO that supports output (e.g., GPIO13-33) and update the wiring."},
+                })
+                break  # One fault per pin is enough
+
+    return faults
+
+
+def _check_3v3_board_voltage(parts: list[dict], adjacency: dict) -> list[dict]:
+    """Check that 5V components aren't directly connected to 3.3V board GPIO pins."""
+    faults = []
+    parts_map = {p["id"]: p for p in parts}
+    board_type = get_board_from_parts(parts)
+
+    if not board_type or board_type not in THREE_V3_BOARDS:
+        return faults
+
+    # STM32 Bluepill is 5V tolerant on most pins — skip it
+    board_info = COMPONENT_PINS.get(board_type, {})
+    if board_info.get("five_v_tolerant"):
+        return faults
+
+    board_ids = {p["id"] for p in parts if p.get("type") == board_type}
+
+    # Find components that output 5V signals
+    for part in parts:
+        ptype = part.get("type", "")
+        comp_info = COMPONENT_PINS.get(ptype, {})
+        if not comp_info or ptype in SUPPORTED_BOARDS:
+            continue
+
+        comp_voltage = comp_info.get("operating_voltage", 0)
+        if comp_voltage != 5.0:
+            continue
+
+        pid = part["id"]
+        # Check if any of this component's signal pins connect to board GPIO
+        for pin_name, pin_info in comp_info.get("pins", {}).items():
+            pin_type = pin_info.get("type", "")
+            if pin_type in POWER_PIN_TYPES or pin_type in GROUND_PIN_TYPES:
+                continue
+            if pin_type in ("data_out", "digital_out", "analog_out", "signal"):
+                key = f"{pid}:{pin_name}"
+                for neighbor in adjacency.get(key, []):
+                    if ":" not in neighbor:
+                        continue
+                    npart_id, npin = neighbor.split(":", 1)
+                    if npart_id in board_ids:
+                        gpio_info = board_info.get("pins", {}).get(npin, {})
+                        if gpio_info.get("type") in ("digital", "analog"):
+                            faults.append({
+                                "category": "power",
+                                "severity": "warning",
+                                "component": pid,
+                                "title": f"5V output from '{pid}' connected to {board_type} GPIO{npin} (3.3V)",
+                                "explanation": f"Component '{pid}' ({ptype}) operates at 5V, but {board_type} GPIO pins are 3.3V. A 5V signal may damage the GPIO pin.",
+                                "fix": {"type": "wiring", "description": f"Add a voltage divider (e.g., 1KΩ + 2KΩ) or level shifter between {pid}:{pin_name} and GPIO{npin}."},
+                            })
+
+    return faults
+
+
+# ---------------------------------------------------------------------------
 # Main analysis functions
 # ---------------------------------------------------------------------------
 
@@ -868,6 +992,9 @@ def analyze_wiring_rules(diagram: dict) -> list[dict]:
     faults.extend(_check_wireless_voltage(parts, adjacency))
     faults.extend(_check_serial_pin_conflict(parts, adjacency))
     faults.extend(_check_spi_pins(parts, adjacency))
+    # Board-specific checks
+    faults.extend(_check_esp32_flash_pins(parts, connections))
+    faults.extend(_check_3v3_board_voltage(parts, adjacency))
     return faults
 
 
@@ -883,6 +1010,10 @@ def analyze_code_rules(sketch_code: str, diagram: dict) -> list[dict]:
     # Wireless code checks
     faults.extend(_check_software_serial_pins(sketch_code, diagram))
     faults.extend(_check_wireless_library_usage(sketch_code, diagram))
+    # Board-specific code checks
+    parts = diagram.get("parts", []) if diagram else []
+    connections = diagram.get("connections", []) if diagram else []
+    faults.extend(_check_esp32_input_only(parts, sketch_code, connections))
     return faults
 
 

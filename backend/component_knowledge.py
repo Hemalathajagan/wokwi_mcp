@@ -69,6 +69,132 @@ COMPONENT_PINS = {
         "operating_voltage": 5.0,
         "requires_power": False,
     },
+    # -----------------------------------------------------------------------
+    # ESP32
+    # -----------------------------------------------------------------------
+    "wokwi-esp32-devkit-v1": {
+        "pins": {
+            **{str(i): {
+                "type": "digital",
+                "pwm": i not in (6, 7, 8, 9, 10, 11),  # flash pins have no PWM
+                "direction": "input" if i in (34, 35, 36, 39) else "io",
+                "input_only": i in (34, 35, 36, 39),
+                "flash_pin": i in (6, 7, 8, 9, 10, 11),
+                "strapping_pin": i in (0, 2, 12),
+                "adc": (
+                    "ADC1" if i in (32, 33, 34, 35, 36, 39) else
+                    "ADC2" if i in (0, 2, 4, 12, 13, 14, 15, 25, 26, 27) else
+                    None
+                ),
+                "dac": i in (25, 26),
+            } for i in range(40)},
+            "GND.1": {"type": "ground"},
+            "GND.2": {"type": "ground"},
+            "3V3": {"type": "power", "voltage": 3.3},
+            "VIN": {"type": "power"},
+            "5V": {"type": "power", "voltage": 5.0},
+        },
+        "max_pin_current_ma": 40,
+        "max_total_current_ma": 1200,
+        "operating_voltage": 3.3,
+        "requires_power": False,
+        "i2c_sda": "21",
+        "i2c_scl": "22",
+        "spi_mosi": "23",
+        "spi_miso": "19",
+        "spi_sck": "18",
+        "flash_pins": [6, 7, 8, 9, 10, 11],
+        "input_only_pins": [34, 35, 36, 39],
+        "strapping_pins": [0, 2, 12],
+        "has_wifi": True,
+        "has_bluetooth": True,
+        "notes": "3.3V logic, NOT 5V tolerant. GPIO6-11 are flash pins (do not use). GPIO34-39 are input-only. Built-in WiFi and Bluetooth.",
+    },
+    # -----------------------------------------------------------------------
+    # Raspberry Pi Pico
+    # -----------------------------------------------------------------------
+    "wokwi-pi-pico": {
+        "pins": {
+            **{f"GP{i}": {
+                "type": "digital",
+                "pwm": True,
+                "direction": "io",
+                "adc": f"ADC{i - 26}" if i in (26, 27, 28) else None,
+            } for i in range(26)},
+            "GND.1": {"type": "ground"},
+            "GND.2": {"type": "ground"},
+            "3V3": {"type": "power", "voltage": 3.3},
+            "VSYS": {"type": "power", "voltage": 5.0},
+            "VBUS": {"type": "power", "voltage": 5.0},
+        },
+        "max_pin_current_ma": 16,
+        "max_total_current_ma": 300,
+        "operating_voltage": 3.3,
+        "requires_power": False,
+        "i2c_sda": "GP0",
+        "i2c_scl": "GP1",
+        "notes": "3.3V logic, NOT 5V tolerant. All GPIO pins support PWM. ADC on GP26-GP28. Programmed with MicroPython or C/C++ SDK.",
+    },
+    # -----------------------------------------------------------------------
+    # ATtiny85
+    # -----------------------------------------------------------------------
+    "wokwi-attiny85": {
+        "pins": {
+            "PB0": {"type": "digital", "pwm": True, "direction": "io"},
+            "PB1": {"type": "digital", "pwm": True, "direction": "io"},
+            "PB2": {"type": "digital", "pwm": False, "direction": "io", "adc": "ADC1"},
+            "PB3": {"type": "digital", "pwm": False, "direction": "io", "adc": "ADC3"},
+            "PB4": {"type": "digital", "pwm": False, "direction": "io", "adc": "ADC2"},
+            "PB5": {"type": "digital", "pwm": False, "direction": "io", "is_reset": True},
+            "VCC": {"type": "power", "voltage": 5.0},
+            "GND": {"type": "ground"},
+        },
+        "max_pin_current_ma": 40,
+        "max_total_current_ma": 200,
+        "operating_voltage": 5.0,
+        "requires_power": False,
+        "notes": "Only 5 usable GPIO pins (PB5 is RESET). No hardware UART — use SoftwareSerial. Very limited resources (8KB flash, 512B RAM).",
+    },
+    # -----------------------------------------------------------------------
+    # STM32 Bluepill
+    # -----------------------------------------------------------------------
+    "board-stm32-bluepill": {
+        "pins": {
+            **{f"PA{i}": {
+                "type": "digital",
+                "pwm": i in (0, 1, 2, 3, 6, 7, 8, 9, 10),
+                "direction": "io",
+                "adc": True if i <= 7 else None,
+            } for i in range(16)},
+            **{f"PB{i}": {
+                "type": "digital",
+                "pwm": i in (0, 1, 6, 7, 8, 9),
+                "direction": "io",
+                "adc": True if i <= 1 else None,
+            } for i in range(16)},
+            "PC13": {"type": "digital", "pwm": False, "direction": "io", "notes": "Built-in LED"},
+            "PC14": {"type": "digital", "pwm": False, "direction": "io"},
+            "PC15": {"type": "digital", "pwm": False, "direction": "io"},
+            "GND.1": {"type": "ground"},
+            "GND.2": {"type": "ground"},
+            "3.3V": {"type": "power", "voltage": 3.3},
+            "5V": {"type": "power", "voltage": 5.0},
+        },
+        "max_pin_current_ma": 25,
+        "max_total_current_ma": 150,
+        "operating_voltage": 3.3,
+        "five_v_tolerant": True,
+        "requires_power": False,
+        "i2c_sda": "PB7",
+        "i2c_scl": "PB6",
+        "spi_mosi": "PA7",
+        "spi_miso": "PA6",
+        "spi_sck": "PA5",
+        "notes": "3.3V logic but most GPIO pins are 5V tolerant. USART1: TX=PA9/RX=PA10, USART2: TX=PA2/RX=PA3.",
+    },
+    # -----------------------------------------------------------------------
+    # Components
+    # -----------------------------------------------------------------------
     "wokwi-led": {
         "pins": {
             "A": {"type": "anode"},
@@ -420,13 +546,55 @@ WIRING_RULES = [
         "applies_to": ["wokwi-hc-05", "wokwi-hc-06", "wokwi-hm-10", "wokwi-esp01"],
         "severity": "warning",
     },
+    # Board-specific rules
+    {
+        "id": "esp32_flash_pins",
+        "description": "ESP32 GPIO6-11 are connected to internal flash memory and must not be used for external connections",
+        "applies_to": ["wokwi-esp32-devkit-v1"],
+        "severity": "error",
+    },
+    {
+        "id": "esp32_input_only_pins",
+        "description": "ESP32 GPIO34, 35, 36, 39 are input-only — cannot be used for OUTPUT, PWM, or driving components",
+        "applies_to": ["wokwi-esp32-devkit-v1"],
+        "severity": "error",
+    },
+    {
+        "id": "esp32_strapping_pins",
+        "description": "ESP32 GPIO0, 2, 12 are strapping pins that affect boot mode — avoid pull-ups/downs on these unless intended",
+        "applies_to": ["wokwi-esp32-devkit-v1"],
+        "severity": "warning",
+    },
+    {
+        "id": "board_3v3_voltage",
+        "description": "ESP32, Pi Pico, and STM32 are 3.3V boards — 5V components/signals may damage GPIO pins",
+        "applies_to": ["wokwi-esp32-devkit-v1", "wokwi-pi-pico", "board-stm32-bluepill"],
+        "severity": "error",
+    },
+    {
+        "id": "attiny_limited_pins",
+        "description": "ATtiny85 has only 5 usable GPIO pins (PB5 is RESET) — check for pin conflicts",
+        "applies_to": ["wokwi-attiny85"],
+        "severity": "info",
+    },
 ]
 
 # Arduino boards for identification
-ARDUINO_BOARDS = {
+SUPPORTED_BOARDS = {
     "wokwi-arduino-uno",
     "wokwi-arduino-mega",
     "wokwi-arduino-nano",
+    "wokwi-esp32-devkit-v1",
+    "wokwi-pi-pico",
+    "wokwi-attiny85",
+    "board-stm32-bluepill",
+}
+
+# Boards that operate at 3.3V logic (NOT 5V tolerant unless specified)
+THREE_V3_BOARDS = {
+    "wokwi-esp32-devkit-v1",
+    "wokwi-pi-pico",
+    "board-stm32-bluepill",
 }
 
 # Pin types that indicate power connections
@@ -496,6 +664,6 @@ def get_analog_pins(board_type: str) -> set[str]:
 def get_board_from_parts(parts: list[dict]) -> str | None:
     """Find the Arduino board type from the parts list."""
     for part in parts:
-        if part.get("type") in ARDUINO_BOARDS:
+        if part.get("type") in SUPPORTED_BOARDS:
             return part["type"]
     return None

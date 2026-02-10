@@ -35,7 +35,14 @@ Analyze the circuit for these fault categories:
 - SPI pin conflicts
 - Analog read on digital-only pin
 
-### 5. Wireless Module Issues
+### 5. Board-Specific Issues
+- **ESP32**: GPIO6-11 are flash pins (never use). GPIO34-39 are input-only. GPIO0/2/12 are strapping pins (affect boot). ADC2 pins unavailable during WiFi. 3.3V logic — not 5V tolerant.
+- **Raspberry Pi Pico**: 3.3V logic, NOT 5V tolerant. All GPIO support PWM. ADC only on GP26-28. Programmed with MicroPython or C SDK.
+- **ATtiny85**: Only 5 usable pins (PB0-PB4, PB5 is RESET). PWM on PB0/PB1 only. No hardware UART. Very limited resources.
+- **STM32 Bluepill**: 3.3V logic but 5V tolerant on most GPIO. PC13 has built-in LED.
+- For all 3.3V boards: check that 5V components have level shifters or voltage dividers on signal lines.
+
+### 6. Wireless Module Issues
 - TX/RX crossover: Bluetooth/WiFi module TX must connect to Arduino RX and vice versa (NOT TX→TX)
 - Voltage level mismatch: HC-05/HC-06 RXD is 3.3V logic — needs voltage divider from 5V Arduino
 - Power issues: ESP-01 draws 300mA peak (Arduino 3.3V pin only supplies 50mA), nRF24L01 is 3.3V only
@@ -45,7 +52,7 @@ Analyze the circuit for these fault categories:
 - Antenna considerations: nRF24L01 needs 10µF capacitor on VCC-GND for stability
 
 For each fault found, return a JSON object with these fields:
-- "category": one of "wiring", "component", "power", "signal", "wireless"
+- "category": one of "wiring", "component", "power", "signal", "wireless", "board_specific"
 - "severity": "error" (will not work), "warning" (may cause issues), or "info" (best practice)
 - "component": the part ID(s) affected
 - "title": short description (one line)
@@ -92,7 +99,13 @@ Analyze for these categories:
 - Servo/I2C/SPI library used but corresponding hardware not in circuit
 - Wrong I2C address in code vs. component default
 
-### 7. Wireless Communication Code Issues
+### 7. Board-Specific Code Issues
+- **ESP32**: Check for WiFi.h/BluetoothSerial.h usage. Flag analogWrite() (ESP32 uses ledcWrite). Flag use of GPIO6-11 or OUTPUT on GPIO34-39.
+- **Pi Pico (MicroPython)**: Different syntax (machine.Pin, machine.PWM). Check for Arduino-specific code on Pico projects.
+- **ATtiny85**: No Serial — flag Serial.begin/print. Limited to SoftwareSerial. Flag use of pins beyond PB0-PB4.
+- **STM32**: Check for STM32-specific HAL or Arduino framework compatibility.
+
+### 8. Wireless Communication Code Issues
 - SoftwareSerial pin numbers don't match the wired Bluetooth/WiFi module pins
 - Missing #include <SoftwareSerial.h> when using Bluetooth/WiFi on non-hardware serial pins
 - Baud rate mismatch: SoftwareSerial.begin() baud rate doesn't match module default (HC-05: 38400, HC-06: 9600, ESP-01: 115200)
