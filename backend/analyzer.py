@@ -21,6 +21,7 @@ from component_knowledge import (
     THREE_V3_BOARDS,
     WIRELESS_MODULES,
     get_relevant_knowledge,
+    get_library_knowledge,
     get_pwm_pins,
     get_analog_pins,
     get_board_from_parts,
@@ -848,6 +849,47 @@ def _check_wireless_library_usage(sketch_code: str, diagram: dict) -> list[dict]
 
 
 # ---------------------------------------------------------------------------
+# Library usage checks
+# ---------------------------------------------------------------------------
+
+def _check_library_init(sketch_code: str) -> list[dict]:
+    """Check that included libraries have their required initialization calls."""
+    from component_knowledge import LIBRARY_KNOWLEDGE
+
+    faults = []
+    if not sketch_code:
+        return faults
+
+    for lib_name, info in LIBRARY_KNOWLEDGE.items():
+        header = info["header"]
+        if f"#include <{header}>" not in sketch_code and f'#include "{header}"' not in sketch_code:
+            continue
+
+        required = info.get("required_init", "")
+        if not required:
+            continue
+
+        # Extract the key function name from required_init (e.g., "servo.attach" → "attach")
+        # Check if the function call pattern exists in the code
+        init_func = required.split("(")[0].split(".")[-1]  # e.g., "begin", "attach", "init"
+
+        # Look for the function call in the code
+        has_init = bool(re.search(rf"\.{init_func}\s*\(", sketch_code))
+
+        if not has_init:
+            faults.append({
+                "category": "code",
+                "severity": "error",
+                "component": lib_name,
+                "title": f"Missing {lib_name} initialization: {required}",
+                "explanation": f"Library {header} is included but the required initialization call '{required}' was not found in the code. The library will not function without initialization.",
+                "fix": {"type": "code", "description": f"Add {required} in setup() function."},
+            })
+
+    return faults
+
+
+# ---------------------------------------------------------------------------
 # Board-specific checks
 # ---------------------------------------------------------------------------
 
@@ -1010,6 +1052,8 @@ def analyze_code_rules(sketch_code: str, diagram: dict) -> list[dict]:
     # Wireless code checks
     faults.extend(_check_software_serial_pins(sketch_code, diagram))
     faults.extend(_check_wireless_library_usage(sketch_code, diagram))
+    # Library usage checks
+    faults.extend(_check_library_init(sketch_code))
     # Board-specific code checks
     parts = diagram.get("parts", []) if diagram else []
     connections = diagram.get("connections", []) if diagram else []
@@ -1057,6 +1101,11 @@ async def analyze_code(sketch_code: str, diagram: dict) -> dict:
     part_types = [p.get("type", "") for p in parts]
     component_ref = get_relevant_knowledge(part_types) if part_types else "No circuit provided."
 
+    # Append library knowledge if libraries are detected in code
+    lib_ref = get_library_knowledge(sketch_code) if sketch_code else ""
+    if lib_ref:
+        component_ref += "\n\n## Library Reference" + lib_ref
+
     rule_faults = analyze_code_rules(sketch_code, diagram or {})
     rule_findings_text = json.dumps(rule_faults, indent=2) if rule_faults else "None"
 
@@ -1090,6 +1139,12 @@ async def full_analysis(diagram: dict, sketch_code: str) -> dict:
     part_types = [p.get("type", "") for p in parts]
     component_ref = get_relevant_knowledge(part_types)
 
+    # Append library knowledge for code-aware analysis
+    lib_ref = get_library_knowledge(sketch_code) if sketch_code else ""
+    code_component_ref = component_ref
+    if lib_ref:
+        code_component_ref = component_ref + "\n\n## Library Reference" + lib_ref
+
     # Rule-based checks (all categories)
     wiring_faults = analyze_wiring_rules(diagram)
     code_faults = analyze_code_rules(sketch_code, diagram) if sketch_code else []
@@ -1111,7 +1166,7 @@ async def full_analysis(diagram: dict, sketch_code: str) -> dict:
 
     if sketch_code:
         try:
-            sys2, usr2 = build_code_analysis_prompt(sketch_code, diagram_json_str, component_ref, rule_findings_text)
+            sys2, usr2 = build_code_analysis_prompt(sketch_code, diagram_json_str, code_component_ref, rule_findings_text)
             code_response = await call_openai(sys2, usr2)
             ai_faults.extend(parse_openai_json(code_response))
         except Exception:

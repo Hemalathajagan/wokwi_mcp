@@ -99,7 +99,14 @@ Analyze for these categories:
 - Servo/I2C/SPI library used but corresponding hardware not in circuit
 - Wrong I2C address in code vs. component default
 
-### 7. Board-Specific Code Issues
+### 7. Library Usage Issues
+- Check that included libraries have required initialization calls (begin(), attach(), init())
+- Verify library constructor arguments match the circuit (pin numbers, I2C addresses, device counts)
+- Flag deprecated API usage (e.g., old IRremote API vs new v4 API)
+- Check for common library-specific mistakes (see Library Reference section in component reference if provided)
+- Verify library compatibility with the board (e.g., SoftwareSerial not needed on ESP32)
+
+### 8. Board-Specific Code Issues
 - **ESP32**: Check for WiFi.h/BluetoothSerial.h usage. Flag analogWrite() (ESP32 uses ledcWrite). Flag use of GPIO6-11 or OUTPUT on GPIO34-39.
 - **Pi Pico (MicroPython)**: Different syntax (machine.Pin, machine.PWM). Check for Arduino-specific code on Pico projects.
 - **ATtiny85**: No Serial — flag Serial.begin/print. Limited to SoftwareSerial. Flag use of pins beyond PB0-PB4.

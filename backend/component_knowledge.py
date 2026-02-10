@@ -615,6 +615,222 @@ WIRELESS_MODULES = {"wokwi-hc-05", "wokwi-hc-06", "wokwi-hm-10", "wokwi-esp01",
                     "wokwi-nrf24l01", "wokwi-ir-receiver", "wokwi-ir-led"}
 
 
+# ---------------------------------------------------------------------------
+# Popular Arduino library knowledge base
+# ---------------------------------------------------------------------------
+
+LIBRARY_KNOWLEDGE = {
+    "Servo": {
+        "header": "Servo.h",
+        "related_components": ["wokwi-servo"],
+        "required_init": "servo.attach(pin)",
+        "common_functions": ["attach", "write", "writeMicroseconds", "read", "attached", "detach"],
+        "common_mistakes": [
+            "Calling write() before attach() — servo won't move",
+            "Using angle > 180 with write() — valid range is 0-180",
+            "Not connecting servo to PWM pin (required for Servo library)",
+            "Powering servo from Arduino 5V pin — draws too much current, use external supply",
+        ],
+        "notes": "Each servo uses one timer. On Uno, using Servo disables PWM on pins 9 and 10.",
+    },
+    "LiquidCrystal": {
+        "header": "LiquidCrystal.h",
+        "related_components": ["wokwi-lcd1602"],
+        "required_init": "lcd.begin(cols, rows)",
+        "common_functions": ["begin", "clear", "setCursor", "print", "display", "noDisplay", "scrollDisplayLeft", "createChar"],
+        "common_mistakes": [
+            "Missing lcd.begin(16, 2) in setup() — display won't initialize",
+            "Wrong pin order in constructor: LiquidCrystal(rs, en, d4, d5, d6, d7)",
+            "Using setCursor(col, row) with wrong order — it's (column, row), not (row, column)",
+            "Calling print() without setCursor() — text appears at last cursor position",
+        ],
+        "notes": "For I2C LCD (most common on Wokwi), use LiquidCrystal_I2C library instead.",
+    },
+    "LiquidCrystal_I2C": {
+        "header": "LiquidCrystal_I2C.h",
+        "related_components": ["wokwi-lcd1602"],
+        "required_init": "lcd.begin() or lcd.init()",
+        "common_functions": ["init", "begin", "backlight", "noBacklight", "clear", "setCursor", "print", "createChar"],
+        "common_mistakes": [
+            "Wrong I2C address — default is 0x27, some modules use 0x3F",
+            "Missing lcd.backlight() — display is on but not visible without backlight",
+            "Not connecting SDA to A4 and SCL to A5 on Uno (or GPIO21/22 on ESP32)",
+            "Missing Wire.h include — LiquidCrystal_I2C depends on Wire library",
+        ],
+        "notes": "Default I2C address for Wokwi LCD1602 is 0x27. Use I2C scanner sketch if unsure.",
+    },
+    "Wire": {
+        "header": "Wire.h",
+        "related_components": ["wokwi-lcd1602"],
+        "required_init": "Wire.begin()",
+        "common_functions": ["begin", "beginTransmission", "endTransmission", "write", "read", "requestFrom", "available"],
+        "common_mistakes": [
+            "Missing Wire.begin() in setup()",
+            "Not calling endTransmission() after beginTransmission() — data never sent",
+            "Wrong I2C pins — Uno: A4(SDA)/A5(SCL), Mega: 20(SDA)/21(SCL), ESP32: 21(SDA)/22(SCL)",
+            "Missing pull-up resistors on SDA/SCL (Arduino has internal pull-ups, but external 4.7kΩ recommended for long wires)",
+        ],
+        "notes": "I2C bus: SDA and SCL must connect to correct board-specific pins.",
+    },
+    "SPI": {
+        "header": "SPI.h",
+        "related_components": ["wokwi-nrf24l01"],
+        "required_init": "SPI.begin()",
+        "common_functions": ["begin", "end", "transfer", "beginTransaction", "endTransaction", "setBitOrder", "setClockDivider"],
+        "common_mistakes": [
+            "Using wrong SPI pins — Uno: MOSI=11, MISO=12, SCK=13; Mega: MOSI=51, MISO=50, SCK=52",
+            "Forgetting to set CS/SS pin as OUTPUT and drive it LOW before transfer",
+            "Not calling SPI.beginTransaction() with correct speed/mode for the device",
+        ],
+        "notes": "SPI pins are fixed by hardware. CS/SS pin can be any digital pin.",
+    },
+    "Adafruit_NeoPixel": {
+        "header": "Adafruit_NeoPixel.h",
+        "related_components": ["wokwi-neopixel"],
+        "required_init": "strip.begin()",
+        "common_functions": ["begin", "show", "setPixelColor", "clear", "setBrightness", "Color", "numPixels", "fill"],
+        "common_mistakes": [
+            "Missing strip.begin() in setup()",
+            "Calling setPixelColor() without strip.show() — LEDs won't update until show() is called",
+            "Wrong pixel count in constructor — must match actual number of LEDs",
+            "Using Color(R,G,B) with values > 255",
+            "Not calling strip.clear() before setting new colors — old colors persist",
+        ],
+        "notes": "NeoPixels need 5V power and a 300-500Ω resistor on the data line. Add 1000µF capacitor across power for large strips.",
+    },
+    "DHT": {
+        "header": "DHT.h",
+        "related_components": ["wokwi-dht22"],
+        "required_init": "dht.begin()",
+        "common_functions": ["begin", "readTemperature", "readHumidity", "computeHeatIndex"],
+        "common_mistakes": [
+            "Missing dht.begin() in setup()",
+            "Wrong DHT type in constructor — use DHT22 for DHT22, DHT11 for DHT11",
+            "Reading too frequently — DHT22 needs 2 seconds between reads",
+            "Not checking for NaN returns — readTemperature() returns NaN on read failure",
+            "Missing 10kΩ pull-up resistor on data pin (some modules have built-in pull-up)",
+        ],
+        "notes": "DHT22 is more accurate than DHT11. Use isnan() to check for read failures.",
+    },
+    "SoftwareSerial": {
+        "header": "SoftwareSerial.h",
+        "related_components": ["wokwi-hc-05", "wokwi-hc-06", "wokwi-hm-10", "wokwi-esp01"],
+        "required_init": "mySerial.begin(baud)",
+        "common_functions": ["begin", "available", "read", "write", "print", "println", "listen"],
+        "common_mistakes": [
+            "Wrong baud rate — must match the connected module (HC-06: 9600, HC-05: 38400, ESP-01: 115200)",
+            "Using pins that don't support pin change interrupts for RX",
+            "Using SoftwareSerial on ESP32 — ESP32 has 3 hardware UARTs, use HardwareSerial instead",
+            "Not calling listen() when using multiple SoftwareSerial instances — only one can receive at a time",
+            "TX/RX pin order in constructor: SoftwareSerial(RX, TX) — RX first, TX second",
+        ],
+        "notes": "SoftwareSerial is unreliable above 57600 baud. ESP32 doesn't need it — use Serial1 or Serial2.",
+    },
+    "RF24": {
+        "header": "RF24.h",
+        "related_components": ["wokwi-nrf24l01"],
+        "required_init": "radio.begin()",
+        "common_functions": ["begin", "openWritingPipe", "openReadingPipe", "startListening", "stopListening", "write", "read", "available", "setPALevel", "setDataRate"],
+        "common_mistakes": [
+            "Wrong CE/CSN pins in constructor — RF24(CE_PIN, CSN_PIN)",
+            "Missing radio.begin() — returns false if module not connected properly",
+            "Not calling stopListening() before write() — transmitter must stop listening first",
+            "Pipe addresses must match between transmitter and receiver",
+            "Not setting same data rate and PA level on both ends",
+            "Powering from 5V — nRF24L01 is 3.3V only",
+        ],
+        "notes": "Add 10µF capacitor between VCC and GND of nRF24L01 for stability. Use setPALevel(RF24_PA_LOW) for testing.",
+    },
+    "IRremote": {
+        "header": "IRremote.h",
+        "related_components": ["wokwi-ir-receiver", "wokwi-ir-led"],
+        "required_init": "IrReceiver.begin(pin) or irrecv.enableIRIn()",
+        "common_functions": ["begin", "enableIRIn", "decode", "resume", "send", "sendNEC", "sendSony", "available"],
+        "common_mistakes": [
+            "Using old API (IRrecv/decode_results) with new IRremote v4 — use IrReceiver.begin() instead",
+            "Not calling resume() or IrReceiver.resume() after processing — stops receiving next signal",
+            "IR receiver on non-interrupt pin — use pin 2 or 3 on Uno for reliability",
+            "IR LED not on PWM pin — needs PWM for 38kHz carrier frequency",
+        ],
+        "notes": "IRremote v3+ changed API significantly. Wokwi typically uses newer versions.",
+    },
+    "Stepper": {
+        "header": "Stepper.h",
+        "related_components": ["wokwi-stepper-motor"],
+        "required_init": "Stepper(steps, pin1, pin2, pin3, pin4)",
+        "common_functions": ["setSpeed", "step"],
+        "common_mistakes": [
+            "Wrong step count — 28BYJ-48 has 2048 steps per revolution (with gear ratio), not 200",
+            "Connecting stepper directly to Arduino pins — use ULN2003 driver",
+            "Wrong pin order in constructor — must match driver wiring (IN1, IN3, IN2, IN4 for ULN2003)",
+            "Setting speed too high — stepper will skip steps. Start with setSpeed(10)",
+        ],
+        "notes": "For 28BYJ-48 with ULN2003: use Stepper(2048, IN1, IN3, IN2, IN4). Pin order matters!",
+    },
+    "ESP32_WiFi": {
+        "header": "WiFi.h",
+        "related_components": ["wokwi-esp32-devkit-v1"],
+        "required_init": "WiFi.begin(ssid, password)",
+        "common_functions": ["begin", "status", "localIP", "disconnect", "reconnect", "RSSI", "scanNetworks"],
+        "common_mistakes": [
+            "Not waiting for connection — check WiFi.status() == WL_CONNECTED in a loop",
+            "Using String for SSID/password — use const char* to avoid memory issues",
+            "Not handling disconnection — WiFi can drop, add reconnection logic",
+            "Using ADC2 pins while WiFi is active — ADC2 is shared with WiFi, use ADC1 (GPIO32-39) instead",
+        ],
+        "notes": "ESP32-specific. WiFi.begin() is non-blocking — must wait for WL_CONNECTED status.",
+    },
+    "AccelStepper": {
+        "header": "AccelStepper.h",
+        "related_components": ["wokwi-stepper-motor"],
+        "required_init": "stepper.setMaxSpeed(speed); stepper.setAcceleration(accel)",
+        "common_functions": ["setMaxSpeed", "setAcceleration", "moveTo", "move", "run", "runToPosition", "currentPosition", "setCurrentPosition"],
+        "common_mistakes": [
+            "Not calling run() in loop() — motor won't move without continuous run() calls",
+            "Missing setMaxSpeed() — default is very slow",
+            "Using runToPosition() in loop — this blocks until position reached",
+            "Wrong interface type in constructor (FULL4WIRE vs DRIVER for different setups)",
+        ],
+        "notes": "AccelStepper provides acceleration/deceleration. More flexible than built-in Stepper library.",
+    },
+    "Keypad": {
+        "header": "Keypad.h",
+        "related_components": ["wokwi-membrane-keypad"],
+        "required_init": "Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS)",
+        "common_functions": ["getKey", "getKeys", "waitForKey", "addEventListener", "setHoldTime", "setDebounceTime"],
+        "common_mistakes": [
+            "Wrong row/column pin mapping — verify which pins connect to rows vs columns",
+            "Key map array doesn't match physical layout — rows and columns swapped",
+            "Only checking getKey() once per loop — returns NO_KEY if not pressed at that exact moment",
+            "Using pins with pull-ups/pull-downs that interfere with keypad matrix scanning",
+        ],
+        "notes": "4x4 keypad needs 8 pins. For fewer pins, consider I2C keypad expander.",
+    },
+}
+
+
+def get_library_knowledge(sketch_code: str) -> str:
+    """Build library reference text based on #include directives found in the sketch."""
+    if not sketch_code:
+        return ""
+
+    lines = []
+    for lib_name, info in LIBRARY_KNOWLEDGE.items():
+        header = info["header"]
+        # Check if this library is included in the sketch
+        if f"#include <{header}>" in sketch_code or f'#include "{header}"' in sketch_code:
+            lines.append(f"\n### {lib_name} ({header})")
+            lines.append(f"- Required init: `{info['required_init']}`")
+            lines.append(f"- Functions: {', '.join(info['common_functions'])}")
+            lines.append("- Common mistakes:")
+            for mistake in info["common_mistakes"]:
+                lines.append(f"  - {mistake}")
+            if info.get("notes"):
+                lines.append(f"- Note: {info['notes']}")
+
+    return "\n".join(lines) if lines else ""
+
+
 def get_relevant_knowledge(part_types: list[str]) -> str:
     """Build a focused pin reference string for the components in the current diagram."""
     lines = []
