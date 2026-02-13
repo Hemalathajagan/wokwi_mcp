@@ -28,6 +28,44 @@ from kicad_prompts import (
 
 
 # ---------------------------------------------------------------------------
+# Signal name patterns for peripheral function matching
+# ---------------------------------------------------------------------------
+
+SIGNAL_PATTERNS: dict[str, dict[str, list[str]]] = {
+    "i2c": {
+        "sda": ["SDA", "I2C_SDA", "I2C0_SDA", "I2C1_SDA", "TWI_SDA"],
+        "scl": ["SCL", "I2C_SCL", "I2C0_SCL", "I2C1_SCL", "TWI_SCL"],
+    },
+    "spi": {
+        "mosi": ["MOSI", "SPI_MOSI", "SPI0_MOSI", "SPI1_MOSI", "SDI", "SPI_SDI"],
+        "miso": ["MISO", "SPI_MISO", "SPI0_MISO", "SPI1_MISO", "SDO", "SPI_SDO"],
+        "sck": ["SCK", "SPI_SCK", "SPI0_SCK", "SPI1_SCK", "SCLK", "SPI_CLK"],
+        "ss": ["SS", "SPI_SS", "CS", "SPI_CS", "NSS", "SPI_NSS"],
+    },
+    "uart": {
+        "tx": ["TX", "TXD", "UART_TX", "UART_TXD", "UART0_TX", "UART1_TX", "USART_TX"],
+        "rx": ["RX", "RXD", "UART_RX", "UART_RXD", "UART0_RX", "UART1_RX", "USART_RX"],
+    },
+    "pwm": {
+        "pwm": ["PWM", "PWM0", "PWM1", "PWM2", "PWM3", "SERVO", "MOTOR_PWM"],
+    },
+}
+
+_UART_TX_PIN_NAMES = {"TX", "TXD", "UART_TX", "UART_TXD", "TX0", "TX1", "TXD0", "TXD1"}
+_UART_RX_PIN_NAMES = {"RX", "RXD", "UART_RX", "UART_RXD", "RX0", "RX1", "RXD0", "RXD1"}
+
+
+def _match_signal_pattern(net_name: str) -> tuple[str, str] | None:
+    """Match a net name to a (peripheral, signal_role) tuple, or None."""
+    upper = net_name.upper()
+    for peripheral, signals in SIGNAL_PATTERNS.items():
+        for signal_role, patterns in signals.items():
+            if upper in [p.upper() for p in patterns]:
+                return (peripheral, signal_role)
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Schematic Rule-Based Checks (ERC)
 # ---------------------------------------------------------------------------
 
@@ -397,6 +435,270 @@ def _check_led_resistors(schematic: dict) -> list[dict]:
     return faults
 
 
+def _check_pin_function_mismatch(schematic: dict) -> list[dict]:
+    """Detect signal nets connected to MCU pins that don't support that function.
+
+    E.g., I2C SDA on a non-I2C GPIO, MOSI on wrong pin, TX on non-UART pin.
+    """
+    faults = []
+    nets = schematic.get("nets", {})
+
+    # Build map: reference -> (lib_id, peripheral_pins_data)
+    mcu_info: dict[str, tuple[str, dict]] = {}
+    for sym in schematic.get("symbols", []):
+        ref = sym.get("reference", "")
+        lib_id = sym.get("lib_id", "")
+        info = match_component(lib_id)
+        if info and "peripheral_pins" in info:
+            mcu_info[ref] = (lib_id, info["peripheral_pins"])
+
+    if not mcu_info:
+        return faults
+
+    for net_name, pin_refs in nets.items():
+        match = _match_signal_pattern(net_name)
+        if match is None:
+            continue
+
+        peripheral, signal_role = match
+
+        for pin_ref in pin_refs:
+            if ":" not in pin_ref:
+                continue
+            ref, rest = pin_ref.split(":", 1)
+
+            if ref not in mcu_info:
+                continue
+
+            lib_id, periph_pins = mcu_info[ref]
+
+            pin_num = rest.split("(")[0]
+            pin_name = ""
+            if "(" in rest and ")" in rest:
+                pin_name = rest.split("(")[1].rstrip(")")
+
+            if peripheral not in periph_pins:
+                continue
+
+            periph_signals = periph_pins[peripheral]
+
+            # Handle ESP32 "any_gpio" PWM case
+            if isinstance(periph_signals, dict) and periph_signals.get("any_gpio"):
+                continue
+
+            if signal_role not in periph_signals:
+                continue
+
+            valid_pins = periph_signals[signal_role]
+
+            if pin_num in valid_pins or pin_name in valid_pins:
+                continue  # Correct pin
+
+            # Build correct pin options for the error message
+            correct_options = []
+            for k in range(0, len(valid_pins), 2):
+                if k + 1 < len(valid_pins):
+                    correct_options.append(f"pin {valid_pins[k + 1]} ({valid_pins[k]})")
+                else:
+                    correct_options.append(valid_pins[k])
+
+            faults.append({
+                "category": "connectivity",
+                "severity": "error",
+                "component": ref,
+                "title": f"{net_name} signal connected to wrong pin on {ref} (pin {pin_num})",
+                "explanation": (
+                    f"Net '{net_name}' appears to be a {peripheral.upper()} {signal_role.upper()} signal, "
+                    f"but it is connected to pin {pin_num}"
+                    f"{f' ({pin_name})' if pin_name else ''} on {ref} ({lib_id}), "
+                    f"which does not support {peripheral.upper()} {signal_role.upper()}. "
+                    f"Valid pins for this function: {', '.join(correct_options)}."
+                ),
+                "fix": {
+                    "type": "schematic",
+                    "description": (
+                        f"Move the {net_name} connection on {ref} to one of the correct "
+                        f"{peripheral.upper()} {signal_role.upper()} pins: {', '.join(correct_options)}."
+                    ),
+                },
+            })
+
+    return faults
+
+
+def _check_polarity(schematic: dict) -> list[dict]:
+    """Detect reversed polarity on LEDs, polarized caps, and diodes."""
+    faults = []
+    nets = schematic.get("nets", {})
+
+    # Build net-to-voltage lookup
+    net_voltage: dict[str, float] = {}
+    for net_name in nets:
+        v = get_power_voltage(net_name)
+        if v is not None:
+            net_voltage[net_name] = v
+
+    # Build (reference, pin_number) -> net_name lookup
+    ref_pin_to_net: dict[tuple[str, str], str] = {}
+    for net_name, pin_refs in nets.items():
+        for pin_ref in pin_refs:
+            if ":" not in pin_ref:
+                continue
+            ref, rest = pin_ref.split(":", 1)
+            pin_num = rest.split("(")[0]
+            ref_pin_to_net[(ref, pin_num)] = net_name
+
+    for sym in schematic.get("symbols", []):
+        ref = sym.get("reference", "")
+        lib_id = sym.get("lib_id", "")
+        info = match_component(lib_id)
+        if not info:
+            continue
+        if "polarity_correct" not in info.get("checks", []):
+            continue
+
+        pins_spec = info.get("pins", {})
+
+        # Identify positive (anode/+) and negative (cathode/-) pins
+        pos_pin_nums = []
+        neg_pin_nums = []
+
+        for pin_key, pin_type in pins_spec.items():
+            is_positive = pin_key in ("A", "+") or pin_type == "anode"
+            is_negative = pin_key in ("K", "-") or pin_type == "cathode"
+
+            if is_positive or is_negative:
+                for p in sym.get("pins", []):
+                    if p.get("name") == pin_key or p.get("number") == pin_key:
+                        if is_positive:
+                            pos_pin_nums.append(p.get("number", ""))
+                        else:
+                            neg_pin_nums.append(p.get("number", ""))
+
+        if not pos_pin_nums or not neg_pin_nums:
+            continue
+
+        for pos_num in pos_pin_nums:
+            for neg_num in neg_pin_nums:
+                pos_net = ref_pin_to_net.get((ref, pos_num))
+                neg_net = ref_pin_to_net.get((ref, neg_num))
+
+                if pos_net is None or neg_net is None:
+                    continue
+                if pos_net not in net_voltage or neg_net not in net_voltage:
+                    continue
+
+                pos_voltage = net_voltage[pos_net]
+                neg_voltage = net_voltage[neg_net]
+
+                if pos_voltage < neg_voltage:
+                    component_type = info.get("description", lib_id)
+                    faults.append({
+                        "category": "component",
+                        "severity": "error",
+                        "component": ref,
+                        "title": f"Reversed polarity on {ref} ({component_type})",
+                        "explanation": (
+                            f"{ref} ({component_type}) appears to have reversed polarity. "
+                            f"The anode/positive pin (pin {pos_num}) is on net '{pos_net}' "
+                            f"({pos_voltage}V) and the cathode/negative pin (pin {neg_num}) "
+                            f"is on net '{neg_net}' ({neg_voltage}V). "
+                            f"The positive pin should be at a higher voltage than the negative pin."
+                        ),
+                        "fix": {
+                            "type": "schematic",
+                            "description": (
+                                f"Swap the connections on {ref}: connect the anode/positive pin "
+                                f"to the higher voltage net ({neg_net}) and the cathode/negative "
+                                f"pin to the lower voltage net ({pos_net}), or rotate the component."
+                            ),
+                        },
+                    })
+
+    return faults
+
+
+def _check_uart_crossover(schematic: dict) -> list[dict]:
+    """Detect UART TX connected to TX (should cross: TX->RX, RX->TX)."""
+    faults = []
+    nets = schematic.get("nets", {})
+
+    for net_name, pin_refs in nets.items():
+        upper_net = net_name.upper()
+
+        is_tx_net = upper_net in _UART_TX_PIN_NAMES
+        is_rx_net = upper_net in _UART_RX_PIN_NAMES
+
+        if not is_tx_net and not is_rx_net:
+            continue
+        if len(pin_refs) < 2:
+            continue
+
+        # Collect pin names for components on this net
+        tx_components: list[tuple[str, str]] = []
+        rx_components: list[tuple[str, str]] = []
+
+        for pin_ref in pin_refs:
+            if ":" not in pin_ref:
+                continue
+            ref, rest = pin_ref.split(":", 1)
+            pin_name = ""
+            if "(" in rest and ")" in rest:
+                pin_name = rest.split("(")[1].rstrip(")")
+
+            upper_pin = pin_name.upper()
+            if upper_pin in _UART_TX_PIN_NAMES:
+                tx_components.append((ref, pin_name))
+            elif upper_pin in _UART_RX_PIN_NAMES:
+                rx_components.append((ref, pin_name))
+
+        # TX net with multiple TX pins = wrong (should be TX->RX crossover)
+        if is_tx_net and len(tx_components) >= 2:
+            refs_str = " and ".join(f"{r[0]} (pin {r[1]})" for r in tx_components)
+            faults.append({
+                "category": "connectivity",
+                "severity": "error",
+                "component": ", ".join(r[0] for r in tx_components),
+                "title": f"UART TX-to-TX connection on net '{net_name}'",
+                "explanation": (
+                    f"Net '{net_name}' connects TX pins from multiple components: {refs_str}. "
+                    f"UART requires crossover wiring: one device's TX must connect to the "
+                    f"other device's RX, not TX to TX."
+                ),
+                "fix": {
+                    "type": "schematic",
+                    "description": (
+                        f"Rewire the UART connection: connect each device's TX pin to the "
+                        f"other device's RX pin (crossover/null-modem wiring)."
+                    ),
+                },
+            })
+
+        # RX net with multiple RX pins = wrong
+        if is_rx_net and len(rx_components) >= 2:
+            refs_str = " and ".join(f"{r[0]} (pin {r[1]})" for r in rx_components)
+            faults.append({
+                "category": "connectivity",
+                "severity": "error",
+                "component": ", ".join(r[0] for r in rx_components),
+                "title": f"UART RX-to-RX connection on net '{net_name}'",
+                "explanation": (
+                    f"Net '{net_name}' connects RX pins from multiple components: {refs_str}. "
+                    f"UART requires crossover wiring: one device's TX must connect to the "
+                    f"other device's RX."
+                ),
+                "fix": {
+                    "type": "schematic",
+                    "description": (
+                        f"Rewire the UART connection: connect each device's TX pin to the "
+                        f"other device's RX pin (crossover/null-modem wiring)."
+                    ),
+                },
+            })
+
+    return faults
+
+
 # ---------------------------------------------------------------------------
 # PCB Rule-Based Checks (DRC)
 # ---------------------------------------------------------------------------
@@ -703,6 +1005,9 @@ def analyze_schematic_rules(schematic: dict) -> list[dict]:
     faults.extend(_check_voltage_mismatch(schematic))
     faults.extend(_check_decoupling_capacitors(schematic))
     faults.extend(_check_led_resistors(schematic))
+    faults.extend(_check_pin_function_mismatch(schematic))
+    faults.extend(_check_polarity(schematic))
+    faults.extend(_check_uart_crossover(schematic))
     return faults
 
 

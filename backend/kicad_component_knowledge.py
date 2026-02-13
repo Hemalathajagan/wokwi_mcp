@@ -183,6 +183,11 @@ KICAD_COMPONENT_DB: dict[str, dict[str, Any]] = {
             "Missing reset pull-up resistor — causes spurious resets from noise",
             "Crystal load caps wrong value — causes clock instability or failure to start",
         ],
+        "peripheral_pins": {
+            "i2c": {"sda": ["PC4", "27"], "scl": ["PC5", "28"]},
+            "spi": {"mosi": ["PB3", "17"], "miso": ["PB4", "18"], "sck": ["PB5", "19"], "ss": ["PB2", "16"]},
+            "uart": {"tx": ["PD1", "3"], "rx": ["PD0", "2"]},
+        },
     },
     "MCU_Microchip:ATmega2560*": {
         "category": "mcu",
@@ -206,6 +211,11 @@ KICAD_COMPONENT_DB: dict[str, dict[str, Any]] = {
             "Missing decoupling on VDDA — causes ADC noise and instability",
             "Connecting 5V to non-5V-tolerant pins (VDDA, NRST, BOOT0)",
         ],
+        "peripheral_pins": {
+            "i2c": {"sda": ["PB7", "59", "PB11", "48"], "scl": ["PB6", "58", "PB10", "47"]},
+            "spi": {"mosi": ["PA7", "17", "PB15", "36"], "miso": ["PA6", "16", "PB14", "35"], "sck": ["PA5", "15", "PB13", "34"]},
+            "uart": {"tx": ["PA9", "30", "PA2", "12"], "rx": ["PA10", "31", "PA3", "13"]},
+        },
     },
     "MCU_ST:STM32F4*": {
         "category": "mcu",
@@ -229,6 +239,21 @@ KICAD_COMPONENT_DB: dict[str, dict[str, Any]] = {
             "Missing external QSPI flash — RP2040 has no internal flash",
             "Missing 27ohm USB series resistors",
         ],
+        "peripheral_pins": {
+            "i2c": {
+                "sda": ["GP0", "2", "GP4", "6", "GP8", "12", "GP12", "16", "GP16", "21", "GP20", "26"],
+                "scl": ["GP1", "3", "GP5", "7", "GP9", "13", "GP13", "17", "GP17", "22", "GP21", "27"],
+            },
+            "spi": {
+                "mosi": ["GP3", "5", "GP7", "10", "GP11", "15", "GP15", "20", "GP19", "25"],
+                "miso": ["GP0", "2", "GP4", "6", "GP8", "12", "GP12", "16", "GP16", "21"],
+                "sck": ["GP2", "4", "GP6", "9", "GP10", "14", "GP14", "19", "GP18", "24"],
+            },
+            "uart": {
+                "tx": ["GP0", "2", "GP4", "6", "GP8", "12", "GP12", "16", "GP16", "21"],
+                "rx": ["GP1", "3", "GP5", "7", "GP9", "13", "GP13", "17", "GP17", "22"],
+            },
+        },
     },
     "RF_Module:ESP32-WROOM*": {
         "category": "mcu_module",
@@ -244,6 +269,12 @@ KICAD_COMPONENT_DB: dict[str, dict[str, Any]] = {
             "Missing pull-up on EN pin — module won't start",
             "GPIO12 pulled high at boot — causes flash voltage error",
         ],
+        "peripheral_pins": {
+            "i2c": {"sda": ["GPIO21", "33"], "scl": ["GPIO22", "36"]},
+            "spi": {"mosi": ["GPIO23", "37"], "miso": ["GPIO19", "31"], "sck": ["GPIO18", "30"], "ss": ["GPIO5", "29"]},
+            "uart": {"tx": ["GPIO1", "35", "GPIO17", "28"], "rx": ["GPIO3", "34", "GPIO16", "27"]},
+            "pwm": {"any_gpio": True},
+        },
     },
     "MCU_Module:Arduino_Nano*": {
         "category": "mcu_module",
