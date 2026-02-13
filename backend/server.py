@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, File, HTTPException, Depends, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -284,6 +284,76 @@ async def api_kicad_suggest_fix(
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fix suggestion failed: {str(e)}")
+
+
+ALLOWED_KICAD_EXTENSIONS = {".kicad_sch", ".kicad_pcb", ".kicad_pro"}
+
+
+@app.post("/api/kicad/upload")
+async def api_kicad_upload(
+    files: list[UploadFile] = File(...),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload KiCad files (.kicad_sch, .kicad_pcb, .kicad_pro) and run full analysis.
+
+    Accepts one or more files. At least one .kicad_sch or .kicad_pcb is required.
+    """
+    schematic_content = ""
+    pcb_content = ""
+    project_content = ""
+    project_name = "uploaded_project"
+
+    for f in files:
+        ext = Path(f.filename).suffix.lower() if f.filename else ""
+        if ext not in ALLOWED_KICAD_EXTENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {f.filename}. Allowed: {', '.join(ALLOWED_KICAD_EXTENSIONS)}",
+            )
+        content = (await f.read()).decode("utf-8")
+        if ext == ".kicad_sch":
+            schematic_content = content
+            project_name = Path(f.filename).stem
+        elif ext == ".kicad_pcb":
+            pcb_content = content
+            if not project_name or project_name == "uploaded_project":
+                project_name = Path(f.filename).stem
+        elif ext == ".kicad_pro":
+            project_content = content
+
+    if not schematic_content and not pcb_content:
+        raise HTTPException(
+            status_code=400,
+            detail="Upload at least one .kicad_sch or .kicad_pcb file",
+        )
+
+    try:
+        project = load_from_content(
+            schematic_content=schematic_content,
+            pcb_content=pcb_content,
+            project_content=project_content,
+            project_name=project_name,
+        )
+        report = await full_kicad_analysis(project)
+
+        # Save to history
+        summary = report.get("summary", {})
+        fault_count = summary.get("total", len(report.get("faults", [])))
+        entry = AnalysisHistory(
+            user_id=user.id,
+            project_type="kicad",
+            project_name=project_name,
+            summary_json=json.dumps(summary),
+            report_json=json.dumps(report),
+            fault_count=fault_count,
+        )
+        db.add(entry)
+        await db.commit()
+
+        return report
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"KiCad analysis failed: {str(e)}")
 
 
 # ---------------------------------------------------------------------------
