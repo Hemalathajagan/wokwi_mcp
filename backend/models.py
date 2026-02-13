@@ -32,8 +32,11 @@ class AnalysisHistory(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
-    wokwi_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    project_type: Mapped[str] = mapped_column(String(50), default="wokwi")
+    wokwi_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     project_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    project_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     summary_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     report_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     fault_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -86,8 +89,11 @@ class UserResponse(BaseModel):
 
 class HistoryResponse(BaseModel):
     id: int
-    wokwi_url: str
+    project_type: str = "wokwi"
+    wokwi_url: str | None = None
     project_id: str | None = None
+    source_path: str | None = None
+    project_name: str | None = None
     summary_json: str | None = None
     report_json: str | None = None
     fault_count: int = 0

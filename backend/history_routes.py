@@ -13,23 +13,29 @@ router = APIRouter(prefix="/api/history", tags=["history"])
 
 @router.get("", response_model=list[HistoryResponse])
 async def get_history(
+    project_type: str | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return the current user's analysis history, newest first (without full report)."""
-    result = await db.execute(
-        select(AnalysisHistory)
-        .where(AnalysisHistory.user_id == user.id)
-        .order_by(desc(AnalysisHistory.created_at))
-        .limit(50)
-    )
+    """Return the current user's analysis history, newest first (without full report).
+
+    Optional project_type filter: 'wokwi' or 'kicad'.
+    """
+    query = select(AnalysisHistory).where(AnalysisHistory.user_id == user.id)
+    if project_type:
+        query = query.where(AnalysisHistory.project_type == project_type)
+    query = query.order_by(desc(AnalysisHistory.created_at)).limit(50)
+
+    result = await db.execute(query)
     items = result.scalars().all()
     # Exclude report_json from list response to keep it lightweight
     return [
         HistoryResponse(
             id=item.id,
+            project_type=getattr(item, "project_type", "wokwi"),
             wokwi_url=item.wokwi_url,
             project_id=item.project_id,
+            project_name=getattr(item, "project_name", None),
             summary_json=item.summary_json,
             fault_count=item.fault_count,
             created_at=item.created_at,

@@ -1,5 +1,5 @@
 """
-Wokwi Arduino Circuit Fault Analyzer
+Circuit Fault Analyzer (Wokwi + KiCad)
 Dual-mode server: FastAPI REST API + MCP Server
 
 Usage:
@@ -27,10 +27,17 @@ import uvicorn
 
 from wokwi_fetch import fetch_project
 from analyzer import full_analysis, analyze_wiring, analyze_code, suggest_fixes
+from kicad_parser import load_from_path, load_from_content
+from kicad_analyzer import (
+    full_kicad_analysis,
+    analyze_kicad_schematic,
+    analyze_kicad_pcb,
+    suggest_kicad_fixes,
+)
 from auth import get_current_user
 from auth_routes import router as auth_router
 from history_routes import router as history_router
-from database import init_db, get_db
+from database import init_db, migrate_db, get_db
 from models import AnalysisHistory, User
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,14 +62,36 @@ class SuggestFixRequest(BaseModel):
     sketch_code: str = ""
 
 
+class KiCadAnalyzeRequest(BaseModel):
+    project_path: str | None = None
+    schematic_content: str | None = None
+    pcb_content: str | None = None
+    project_content: str | None = None
+
+
+class KiCadCheckSchematicRequest(BaseModel):
+    schematic_content: str
+
+
+class KiCadCheckPcbRequest(BaseModel):
+    pcb_content: str
+    schematic_content: str | None = None
+
+
+class KiCadSuggestFixRequest(BaseModel):
+    fault_report: str
+    schematic_content: str | None = None
+    pcb_content: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
-    title="Wokwi Circuit Analyzer",
-    description="AI-powered Arduino circuit fault detection",
-    version="1.0.0",
+    title="Circuit Analyzer",
+    description="AI-powered circuit fault detection for Wokwi and KiCad projects",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -81,6 +110,7 @@ app.include_router(history_router)
 @app.on_event("startup")
 async def startup():
     await init_db()
+    await migrate_db()
 
 
 @app.get("/api/health")
@@ -159,6 +189,104 @@ async def api_suggest_fix(req: SuggestFixRequest, user: User = Depends(get_curre
 
 
 # ---------------------------------------------------------------------------
+# KiCad REST API endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/kicad/analyze")
+async def api_kicad_analyze(
+    req: KiCadAnalyzeRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Analyze a KiCad project (from local path or pasted file content)."""
+    try:
+        if req.project_path:
+            project = load_from_path(req.project_path)
+        elif req.schematic_content or req.pcb_content:
+            project = load_from_content(
+                schematic_content=req.schematic_content or "",
+                pcb_content=req.pcb_content or "",
+                project_content=req.project_content or "",
+            )
+        else:
+            raise ValueError("Provide either project_path or schematic_content/pcb_content")
+
+        report = await full_kicad_analysis(project)
+
+        # Save to history
+        summary = report.get("summary", {})
+        fault_count = summary.get("total", len(report.get("faults", [])))
+        entry = AnalysisHistory(
+            user_id=user.id,
+            project_type="kicad",
+            project_name=project.project_name,
+            source_path=project.source_path,
+            summary_json=json.dumps(summary),
+            report_json=json.dumps(report),
+            fault_count=fault_count,
+        )
+        db.add(entry)
+        await db.commit()
+
+        return report
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"KiCad analysis failed: {str(e)}")
+
+
+@app.post("/api/kicad/check-schematic")
+async def api_kicad_check_schematic(
+    req: KiCadCheckSchematicRequest,
+    user: User = Depends(get_current_user),
+):
+    """Analyze a KiCad schematic for ERC errors."""
+    try:
+        project = load_from_content(schematic_content=req.schematic_content)
+        report = await analyze_kicad_schematic(project.schematic, project.raw_schematic)
+        return report
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Schematic analysis failed: {str(e)}")
+
+
+@app.post("/api/kicad/check-pcb")
+async def api_kicad_check_pcb(
+    req: KiCadCheckPcbRequest,
+    user: User = Depends(get_current_user),
+):
+    """Analyze a KiCad PCB layout for DRC errors."""
+    try:
+        project = load_from_content(
+            pcb_content=req.pcb_content,
+            schematic_content=req.schematic_content or "",
+        )
+        report = await analyze_kicad_pcb(
+            project.pcb, project.schematic, project.raw_pcb, project.raw_schematic
+        )
+        return report
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PCB analysis failed: {str(e)}")
+
+
+@app.post("/api/kicad/suggest-fix")
+async def api_kicad_suggest_fix(
+    req: KiCadSuggestFixRequest,
+    user: User = Depends(get_current_user),
+):
+    """Generate fix suggestions for KiCad design issues."""
+    try:
+        result = await suggest_kicad_fixes(
+            req.fault_report,
+            raw_sch=req.schematic_content or "",
+            raw_pcb=req.pcb_content or "",
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Fix suggestion failed: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
 # MCP Server mode
 # ---------------------------------------------------------------------------
 
@@ -166,7 +294,7 @@ def run_mcp_server():
     """Run as an MCP server over stdio."""
     from mcp.server.fastmcp import FastMCP
 
-    mcp = FastMCP("WokwiAnalyzer")
+    mcp = FastMCP("CircuitAnalyzer")
 
     @mcp.tool()
     async def analyze_wokwi_project(wokwi_url: str) -> str:
@@ -225,6 +353,91 @@ def run_mcp_server():
         result = await suggest_fixes(fault_report, diagram, sketch_code)
         return json.dumps(result, indent=2)
 
+    @mcp.tool()
+    async def analyze_kicad_project(
+        project_path: str = "",
+        schematic_content: str = "",
+        pcb_content: str = "",
+        project_content: str = "",
+    ) -> str:
+        """Analyze a KiCad EDA project for schematic (ERC) and PCB (DRC) errors.
+        Provide either a local project_path OR paste schematic/pcb content directly.
+
+        Args:
+            project_path: Local path to a KiCad project directory or file
+            schematic_content: Raw content of a .kicad_sch file
+            pcb_content: Raw content of a .kicad_pcb file
+            project_content: Raw content of a .kicad_pro file (optional)
+        """
+        try:
+            if project_path:
+                project = load_from_path(project_path)
+            elif schematic_content or pcb_content:
+                project = load_from_content(
+                    schematic_content=schematic_content,
+                    pcb_content=pcb_content,
+                    project_content=project_content,
+                )
+            else:
+                return json.dumps({"error": "Provide project_path or schematic_content/pcb_content"})
+            report = await full_kicad_analysis(project)
+            return json.dumps(report, indent=2)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    @mcp.tool()
+    async def check_kicad_schematic(schematic_content: str) -> str:
+        """Analyze a KiCad schematic (.kicad_sch) for electrical rule check (ERC) errors.
+        Detects unconnected pins, power issues, duplicate references, and more.
+
+        Args:
+            schematic_content: Raw content of a .kicad_sch file
+        """
+        try:
+            project = load_from_content(schematic_content=schematic_content)
+            report = await analyze_kicad_schematic(project.schematic, project.raw_schematic)
+            return json.dumps(report, indent=2)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    @mcp.tool()
+    async def check_kicad_pcb(pcb_content: str, schematic_content: str = "") -> str:
+        """Analyze a KiCad PCB layout (.kicad_pcb) for design rule check (DRC) errors.
+        Detects clearance violations, trace width issues, unrouted nets, and more.
+
+        Args:
+            pcb_content: Raw content of a .kicad_pcb file
+            schematic_content: Optional .kicad_sch content for cross-reference checks
+        """
+        try:
+            project = load_from_content(
+                pcb_content=pcb_content,
+                schematic_content=schematic_content,
+            )
+            report = await analyze_kicad_pcb(
+                project.pcb, project.schematic, project.raw_pcb, project.raw_schematic
+            )
+            return json.dumps(report, indent=2)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    @mcp.tool()
+    async def suggest_kicad_fix(
+        fault_report: str, schematic_content: str = "", pcb_content: str = ""
+    ) -> str:
+        """Generate fix suggestions for KiCad schematic and PCB design issues.
+
+        Args:
+            fault_report: The fault analysis text from a previous KiCad analysis
+            schematic_content: Original .kicad_sch content (for schematic fixes)
+            pcb_content: Original .kicad_pcb content (for PCB fixes)
+        """
+        try:
+            result = await suggest_kicad_fixes(fault_report, schematic_content, pcb_content)
+            return json.dumps(result, indent=2)
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
     mcp.run()
 
 
@@ -233,7 +446,7 @@ def run_mcp_server():
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Wokwi Circuit Analyzer Server")
+    parser = argparse.ArgumentParser(description="Circuit Analyzer Server")
     parser.add_argument(
         "--mode",
         choices=["api", "mcp"],
@@ -248,6 +461,6 @@ if __name__ == "__main__":
     if args.mode == "mcp":
         run_mcp_server()
     else:
-        print(f"Starting Wokwi Circuit Analyzer API on http://{args.host}:{args.port}")
+        print(f"Starting Circuit Analyzer API on http://{args.host}:{args.port}")
         print("Docs available at http://localhost:8000/docs")
         uvicorn.run(app, host=args.host, port=args.port)
