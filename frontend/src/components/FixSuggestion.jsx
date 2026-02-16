@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { suggestFix } from '../api';
+import { suggestFix, suggestKiCadFix } from '../api';
 
-export default function FixSuggestion({ report }) {
+export default function FixSuggestion({ report, projectType }) {
   const [fixResult, setFixResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  const isKiCad = projectType === 'kicad';
 
   if (!report || !report.faults || report.faults.length === 0) return null;
 
@@ -12,9 +14,19 @@ export default function FixSuggestion({ report }) {
     setLoading(true);
     setError(null);
     try {
-      const faultReport = JSON.stringify(report.faults, null, 2);
-      const diagramJson = report.diagram ? JSON.stringify(report.diagram) : '';
-      const result = await suggestFix(faultReport, diagramJson, report.sketch_code || '');
+      let result;
+      if (isKiCad) {
+        const faultReport = JSON.stringify(report.faults, null, 2);
+        result = await suggestKiCadFix(
+          faultReport,
+          report.raw_schematic || '',
+          report.raw_pcb || ''
+        );
+      } else {
+        const faultReport = JSON.stringify(report.faults, null, 2);
+        const diagramJson = report.diagram ? JSON.stringify(report.diagram) : '';
+        result = await suggestFix(faultReport, diagramJson, report.sketch_code || '');
+      }
       if (result.error) {
         setError(result.error);
       } else {
@@ -42,6 +54,8 @@ export default function FixSuggestion({ report }) {
               <span className="spinner"></span>
               Generating fixes...
             </>
+          ) : isKiCad ? (
+            'Generate Schematic & PCB Fixes'
           ) : (
             'Generate Corrected Code & Wiring'
           )}
@@ -61,7 +75,7 @@ export default function FixSuggestion({ report }) {
 
           {fixResult.wiring_changes && fixResult.wiring_changes.length > 0 && (
             <div className="fix-section">
-              <h3>Wiring Changes</h3>
+              <h3>{isKiCad ? 'Schematic Changes' : 'Wiring Changes'}</h3>
               {fixResult.wiring_changes.map((change, i) => (
                 <div key={i} className="wiring-change">
                   <p>{change.description}</p>
@@ -76,7 +90,7 @@ export default function FixSuggestion({ report }) {
             </div>
           )}
 
-          {fixResult.corrected_code && (
+          {!isKiCad && fixResult.corrected_code && (
             <div className="fix-section">
               <h3>Corrected Code</h3>
               <div className="code-container">

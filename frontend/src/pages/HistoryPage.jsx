@@ -56,24 +56,36 @@ export default function HistoryPage() {
 
       {history.length === 0 ? (
         <div className="history-empty">
-          <p>No analyses yet. Go to the dashboard and analyze a Wokwi project.</p>
+          <p>No analyses yet. Go to the dashboard and analyze a Wokwi or KiCad project.</p>
         </div>
       ) : (
         <div className="history-list">
           {history.map((item) => {
             const summary = parseSummary(item.summary_json);
+            const isKiCad = item.project_type === 'kicad';
             return (
               <div key={item.id} className="history-card">
                 <div className="history-card-header">
                   <div className="history-card-info">
-                    <a
-                      href={item.wokwi_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="history-url"
-                    >
-                      {item.wokwi_url}
-                    </a>
+                    <div className="history-card-title-row">
+                      <span className={`project-type-badge ${isKiCad ? 'kicad' : 'wokwi'}`}>
+                        {isKiCad ? 'KiCad' : 'Wokwi'}
+                      </span>
+                      {isKiCad ? (
+                        <span className="history-project-name">
+                          {item.project_name || 'KiCad Project'}
+                        </span>
+                      ) : (
+                        <a
+                          href={item.wokwi_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="history-url"
+                        >
+                          {item.wokwi_url}
+                        </a>
+                      )}
+                    </div>
                     <span className="history-date">
                       {new Date(item.created_at).toLocaleString()}
                     </span>

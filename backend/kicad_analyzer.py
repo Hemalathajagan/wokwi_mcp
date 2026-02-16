@@ -55,6 +55,23 @@ _UART_TX_PIN_NAMES = {"TX", "TXD", "UART_TX", "UART_TXD", "TX0", "TX1", "TXD0", 
 _UART_RX_PIN_NAMES = {"RX", "RXD", "UART_RX", "UART_RXD", "RX0", "RX1", "RXD0", "RXD1"}
 
 
+# ---------------------------------------------------------------------------
+# Known footprint pad counts for pad-mismatch detection
+# ---------------------------------------------------------------------------
+
+FOOTPRINT_PAD_COUNTS: dict[str, int] = {
+    "DIP-8": 8, "DIP-14": 14, "DIP-16": 16, "DIP-20": 20, "DIP-28": 28, "DIP-40": 40,
+    "SOIC-8": 8, "SOIC-14": 14, "SOIC-16": 16,
+    "TSSOP-8": 8, "TSSOP-14": 14, "TSSOP-16": 16, "TSSOP-20": 20,
+    "QFP-32": 32, "QFP-44": 44, "QFP-48": 48, "QFP-64": 64, "QFP-100": 100,
+    "QFN-16": 16, "QFN-20": 20, "QFN-24": 24, "QFN-32": 32, "QFN-48": 48,
+    "SOT-23": 3, "SOT-23-5": 5, "SOT-23-6": 6,
+    "SOT-223": 4, "SOT-89": 3, "SC-70-5": 5,
+    "TO-220-3": 3, "TO-92": 3, "TO-263-3": 3,
+    "LQFP-48": 48, "LQFP-64": 64, "LQFP-100": 100, "LQFP-144": 144,
+}
+
+
 def _match_signal_pattern(net_name: str) -> tuple[str, str] | None:
     """Match a net name to a (peripheral, signal_role) tuple, or None."""
     upper = net_name.upper()
@@ -700,6 +717,221 @@ def _check_uart_crossover(schematic: dict) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Library Validation Checks
+# ---------------------------------------------------------------------------
+
+def _check_pin_type_conflicts(schematic: dict) -> list[dict]:
+    """Detect pins with conflicting electrical types connected on the same net."""
+    faults = []
+    nets = schematic.get("nets", {})
+
+    # Build a mapping from (reference, pin_number) -> electrical_type
+    pin_types: dict[tuple[str, str], str] = {}
+    for sym in schematic.get("symbols", []):
+        ref = sym.get("reference", "")
+        for pin in sym.get("pins", []):
+            pin_num = pin.get("number", "")
+            etype = pin.get("electrical_type", "")
+            if ref and pin_num and etype:
+                pin_types[(ref, pin_num)] = etype
+
+    # Also collect from power symbols
+    for psym in schematic.get("power_symbols", []):
+        ref = psym.get("reference", psym.get("value", ""))
+        for pin in psym.get("pins", []):
+            pin_num = pin.get("number", "")
+            etype = pin.get("electrical_type", "")
+            if ref and pin_num and etype:
+                pin_types[(ref, pin_num)] = etype
+
+    output_types = {"output", "power_out"}
+
+    for net_name, pin_refs in nets.items():
+        # Collect electrical types of all pins on this net
+        types_on_net: list[tuple[str, str, str]] = []  # (ref, pin_num, etype)
+        for pin_ref in pin_refs:
+            if ":" not in pin_ref:
+                continue
+            ref, rest = pin_ref.split(":", 1)
+            pin_num = rest.split("(")[0]
+            etype = pin_types.get((ref, pin_num), "")
+            if etype:
+                types_on_net.append((ref, pin_num, etype))
+
+        # Count output-type pins on this net
+        output_pins = [(r, p, t) for r, p, t in types_on_net if t in output_types]
+        if len(output_pins) >= 2:
+            refs_str = ", ".join(f"{r} pin {p} ({t})" for r, p, t in output_pins)
+            faults.append({
+                "category": "erc",
+                "severity": "error",
+                "component": ", ".join(r for r, _, _ in output_pins),
+                "title": f"Output conflict on net '{net_name}': {len(output_pins)} outputs driving same net",
+                "explanation": (
+                    f"Net '{net_name}' has {len(output_pins)} output/power_out pins connected: "
+                    f"{refs_str}. Multiple outputs driving the same net causes bus contention "
+                    f"and can damage components."
+                ),
+                "fix": {
+                    "type": "schematic",
+                    "description": (
+                        f"Ensure only one output drives net '{net_name}'. Use tri-state buffers, "
+                        f"multiplexers, or separate the net if multiple sources are needed."
+                    ),
+                },
+            })
+
+        # Check if an output pin drives a power_in pin directly (should go through regulator)
+        has_output = any(t == "output" for _, _, t in types_on_net)
+        has_power_in = any(t == "power_in" for _, _, t in types_on_net)
+        if has_output and has_power_in:
+            out_refs = [f"{r} pin {p}" for r, p, t in types_on_net if t == "output"]
+            pwr_refs = [f"{r} pin {p}" for r, p, t in types_on_net if t == "power_in"]
+            faults.append({
+                "category": "power",
+                "severity": "warning",
+                "component": ", ".join(r for r, _, t in types_on_net if t == "output"),
+                "title": f"Output pin directly driving power_in pin on net '{net_name}'",
+                "explanation": (
+                    f"On net '{net_name}', output pin(s) {', '.join(out_refs)} directly "
+                    f"drive power_in pin(s) {', '.join(pwr_refs)}. Power pins should typically "
+                    f"be driven by a voltage regulator or power supply, not a logic output."
+                ),
+                "fix": {
+                    "type": "schematic",
+                    "description": (
+                        f"Use a voltage regulator or proper power source to supply the power "
+                        f"pin(s) on net '{net_name}' instead of driving them from a logic output."
+                    ),
+                },
+            })
+
+    return faults
+
+
+def _check_footprint_pad_mismatch(schematic: dict) -> list[dict]:
+    """Detect when a symbol's pin count doesn't match its assigned footprint's pad count."""
+    faults = []
+
+    for sym in schematic.get("symbols", []):
+        ref = sym.get("reference", "")
+        if not ref or ref.startswith("#"):
+            continue
+
+        footprint = sym.get("footprint", "")
+        if not footprint:
+            continue
+
+        pin_count = len(sym.get("pins", []))
+        if pin_count == 0:
+            continue
+
+        # Try to match footprint string against known pad counts
+        # Check longest keys first to avoid partial matches (e.g., SOT-23-5 before SOT-23)
+        expected_pads = None
+        matched_pkg = None
+        for pkg in sorted(FOOTPRINT_PAD_COUNTS.keys(), key=len, reverse=True):
+            if pkg in footprint:
+                expected_pads = FOOTPRINT_PAD_COUNTS[pkg]
+                matched_pkg = pkg
+                break
+
+        if expected_pads is not None and pin_count != expected_pads:
+            lib_id = sym.get("lib_id", "")
+            faults.append({
+                "category": "component",
+                "severity": "warning",
+                "component": ref,
+                "title": f"Pin/pad count mismatch on {ref}: {pin_count} pins vs {matched_pkg} ({expected_pads} pads)",
+                "explanation": (
+                    f"{ref} ({lib_id}) has {pin_count} pins in the schematic symbol but is "
+                    f"assigned footprint '{footprint}' which is a {matched_pkg} package with "
+                    f"{expected_pads} pads. This mismatch will cause errors during PCB layout."
+                ),
+                "fix": {
+                    "type": "schematic",
+                    "description": (
+                        f"Either change the footprint of {ref} to match its {pin_count}-pin symbol, "
+                        f"or use the correct symbol variant that matches the {matched_pkg} footprint."
+                    ),
+                },
+            })
+
+    return faults
+
+
+def _check_lib_symbol_issues(schematic: dict) -> list[dict]:
+    """Detect issues in library symbol definitions."""
+    faults = []
+    lib_symbols = schematic.get("lib_symbols", {})
+
+    for sym in schematic.get("symbols", []):
+        ref = sym.get("reference", "")
+        lib_id = sym.get("lib_id", "")
+        if not ref or ref.startswith("#"):
+            continue
+
+        # Count pin types from the symbol's own pin data
+        pin_types_count: dict[str, int] = {}
+        pins = sym.get("pins", [])
+        for pin in pins:
+            etype = pin.get("electrical_type", "")
+            if etype:
+                pin_types_count[etype] = pin_types_count.get(etype, 0) + 1
+
+        total_pins = len(pins)
+        if total_pins == 0:
+            continue
+
+        # Check 1: IC symbol (U reference) with no power_in pins
+        if ref.startswith("U") and total_pins >= 4:
+            power_in_count = pin_types_count.get("power_in", 0)
+            if power_in_count == 0:
+                faults.append({
+                    "category": "erc",
+                    "severity": "warning",
+                    "component": ref,
+                    "title": f"IC {ref} has no power pins defined in symbol",
+                    "explanation": (
+                        f"{ref} ({lib_id}) is an IC with {total_pins} pins but none are "
+                        f"typed as 'power_in'. This usually means the library symbol is missing "
+                        f"VCC/GND pin definitions, which prevents proper ERC power checking."
+                    ),
+                    "fix": {
+                        "type": "schematic",
+                        "description": (
+                            f"Edit the library symbol for {lib_id} and set the correct "
+                            f"electrical type ('power_in') on VCC/VDD and GND pins."
+                        ),
+                    },
+                })
+
+        # Check 2: Symbol with 4+ pins where ALL are passive (suspicious for ICs)
+        passive_count = pin_types_count.get("passive", 0)
+        if total_pins >= 4 and passive_count == total_pins and ref.startswith("U"):
+            faults.append({
+                "category": "erc",
+                "severity": "info",
+                "component": ref,
+                "title": f"All {total_pins} pins on IC {ref} marked as passive",
+                "explanation": (
+                    f"{ref} ({lib_id}) has {total_pins} pins and all are marked as 'passive'. "
+                    f"For ICs this usually indicates a poorly-defined library symbol. Correct "
+                    f"pin types (input, output, power_in, etc.) enable proper ERC checking."
+                ),
+                "fix": {
+                    "type": "schematic",
+                    "description": (
+                        f"Edit the library symbol for {lib_id} and assign correct electrical "
+                        f"types to each pin (input, output, bidirectional, power_in, etc.)."
+                    ),
+                },
+            })
+
+    return faults
+
+
+# ---------------------------------------------------------------------------
 # PCB Rule-Based Checks (DRC)
 # ---------------------------------------------------------------------------
 
@@ -1008,6 +1240,9 @@ def analyze_schematic_rules(schematic: dict) -> list[dict]:
     faults.extend(_check_pin_function_mismatch(schematic))
     faults.extend(_check_polarity(schematic))
     faults.extend(_check_uart_crossover(schematic))
+    faults.extend(_check_pin_type_conflicts(schematic))
+    faults.extend(_check_footprint_pad_mismatch(schematic))
+    faults.extend(_check_lib_symbol_issues(schematic))
     return faults
 
 

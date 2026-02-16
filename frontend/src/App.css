@@ -531,6 +531,124 @@ header .subtitle {
   color: #666;
 }
 
+/* Mode Toggle */
+.mode-toggle {
+  display: flex;
+  gap: 0;
+  margin-bottom: 1.25rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+  width: fit-content;
+}
+
+.mode-toggle button {
+  padding: 0.6rem 1.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  border: none;
+  background: #f9fafb;
+  color: #6b7280;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.mode-toggle button.active {
+  background: #3b82f6;
+  color: white;
+}
+
+/* KiCad Upload */
+.kicad-upload {
+  margin-bottom: 2rem;
+}
+
+.drop-zone {
+  border: 2px dashed #d1d5db;
+  border-radius: 8px;
+  padding: 2rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  color: #6b7280;
+}
+
+.drop-zone:hover {
+  border-color: #93c5fd;
+  background: #f0f9ff;
+}
+
+.drop-zone.drag-over {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+
+.file-list {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  padding: 0.3rem 0.6rem;
+  border-radius: 16px;
+  font-size: 0.8rem;
+}
+
+.file-chip-remove {
+  background: none;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0;
+}
+
+.file-chip-remove:hover {
+  color: #dc2626;
+}
+
+/* Project Type Badge */
+.project-type-badge {
+  display: inline-block;
+  padding: 0.15rem 0.6rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
+
+.project-type-badge.wokwi {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.project-type-badge.kicad {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.history-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.history-project-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #374151;
+}
+
 /* URL Input */
 .url-input {
   margin-bottom: 2rem;

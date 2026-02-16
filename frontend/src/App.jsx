@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import UrlInput from './components/UrlInput';
+import KiCadUpload from './components/KiCadUpload';
 import SummaryBar from './components/SummaryBar';
 import CircuitViewer from './components/CircuitViewer';
+import SchematicViewer from './components/SchematicViewer';
 import FaultReport from './components/FaultReport';
 import CodeView from './components/CodeView';
 import FixSuggestion from './components/FixSuggestion';
-import { analyzeProject } from './api';
+import { analyzeProject, uploadKiCadFiles } from './api';
 import LoginPage from './auth/LoginPage';
 import ProtectedRoute from './auth/ProtectedRoute';
 import UserMenu from './auth/UserMenu';
@@ -16,6 +18,7 @@ import HistoryDetailPage from './pages/HistoryDetailPage';
 import './App.css';
 
 function Dashboard() {
+  const [mode, setMode] = useState('wokwi');
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -25,9 +28,10 @@ function Dashboard() {
     setLoading(true);
     setError(null);
     setReport(null);
+    setActiveSection('faults');
     try {
       const result = await analyzeProject(url);
-      setReport(result);
+      setReport({ ...result, _projectType: 'wokwi' });
     } catch (err) {
       setError(err.response?.data?.detail || err.message);
     } finally {
@@ -35,9 +39,68 @@ function Dashboard() {
     }
   };
 
+  const handleKiCadAnalyze = async (files) => {
+    setLoading(true);
+    setError(null);
+    setReport(null);
+    setActiveSection('faults');
+    try {
+      const result = await uploadKiCadFiles(files);
+      setReport({ ...result, _projectType: 'kicad' });
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleModeSwitch = (newMode) => {
+    if (newMode !== mode) {
+      setMode(newMode);
+      setReport(null);
+      setError(null);
+      setActiveSection('faults');
+    }
+  };
+
+  const projectType = report?._projectType || mode;
+  const isKiCad = projectType === 'kicad';
+
+  const tabs = isKiCad
+    ? [
+        { key: 'faults', label: 'Fault Report' },
+        { key: 'schematic', label: 'Project Info' },
+        { key: 'fix', label: 'Fix Suggestions' },
+      ]
+    : [
+        { key: 'faults', label: 'Fault Report' },
+        { key: 'circuit', label: 'Circuit' },
+        { key: 'code', label: 'Code' },
+        { key: 'fix', label: 'Fix Suggestions' },
+      ];
+
   return (
     <>
-      <UrlInput onAnalyze={handleAnalyze} loading={loading} />
+      <div className="mode-toggle">
+        <button
+          className={mode === 'wokwi' ? 'active' : ''}
+          onClick={() => handleModeSwitch('wokwi')}
+        >
+          Wokwi
+        </button>
+        <button
+          className={mode === 'kicad' ? 'active' : ''}
+          onClick={() => handleModeSwitch('kicad')}
+        >
+          KiCad
+        </button>
+      </div>
+
+      {mode === 'wokwi' ? (
+        <UrlInput onAnalyze={handleAnalyze} loading={loading} />
+      ) : (
+        <KiCadUpload onAnalyze={handleKiCadAnalyze} loading={loading} />
+      )}
 
       {error && (
         <div className="error-banner">
@@ -50,16 +113,13 @@ function Dashboard() {
           <SummaryBar summary={report.summary} />
 
           <nav className="section-nav">
-            {['faults', 'circuit', 'code', 'fix'].map((section) => (
+            {tabs.map(({ key, label }) => (
               <button
-                key={section}
-                className={activeSection === section ? 'active' : ''}
-                onClick={() => setActiveSection(section)}
+                key={key}
+                className={activeSection === key ? 'active' : ''}
+                onClick={() => setActiveSection(key)}
               >
-                {section === 'faults' && 'Fault Report'}
-                {section === 'circuit' && 'Circuit'}
-                {section === 'code' && 'Code'}
-                {section === 'fix' && 'Fix Suggestions'}
+                {label}
               </button>
             ))}
           </nav>
@@ -68,17 +128,20 @@ function Dashboard() {
             {activeSection === 'faults' && (
               <FaultReport faults={report.faults} />
             )}
-            {activeSection === 'circuit' && (
+            {activeSection === 'circuit' && !isKiCad && (
               <CircuitViewer diagram={report.diagram} />
             )}
-            {activeSection === 'code' && (
+            {activeSection === 'schematic' && isKiCad && (
+              <SchematicViewer report={report} />
+            )}
+            {activeSection === 'code' && !isKiCad && (
               <CodeView
                 sketchCode={report.sketch_code}
                 faults={report.faults}
               />
             )}
             {activeSection === 'fix' && (
-              <FixSuggestion report={report} />
+              <FixSuggestion report={report} projectType={projectType} />
             )}
           </div>
         </>
@@ -93,8 +156,8 @@ function App() {
       <header>
         <div className="header-row">
           <div>
-            <h1>Wokwi Circuit Analyzer</h1>
-            <p className="subtitle">AI-powered Arduino circuit fault detection</p>
+            <h1>Circuit Analyzer</h1>
+            <p className="subtitle">AI-powered circuit fault detection for Wokwi & KiCad</p>
           </div>
           <UserMenu />
         </div>
@@ -139,7 +202,7 @@ function App() {
       </main>
 
       <footer>
-        <p>Powered by OpenAI GPT-4o | Analyzes public Wokwi projects</p>
+        <p>Powered by OpenAI GPT-4o | Analyzes Wokwi and KiCad projects</p>
       </footer>
     </div>
   );

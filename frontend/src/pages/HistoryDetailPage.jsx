@@ -4,6 +4,7 @@ import { getHistoryItem } from '../api';
 import SummaryBar from '../components/SummaryBar';
 import FaultReport from '../components/FaultReport';
 import CircuitViewer from '../components/CircuitViewer';
+import SchematicViewer from '../components/SchematicViewer';
 import CodeView from '../components/CodeView';
 import FixSuggestion from '../components/FixSuggestion';
 
@@ -43,15 +44,40 @@ export default function HistoryDetailPage() {
     );
   }
 
+  const projectType = report?.project_type || meta?.project_type || 'wokwi';
+  const isKiCad = projectType === 'kicad';
+
+  const tabs = isKiCad
+    ? [
+        { key: 'faults', label: 'Fault Report' },
+        { key: 'schematic', label: 'Project Info' },
+        { key: 'fix', label: 'Fix Suggestions' },
+      ]
+    : [
+        { key: 'faults', label: 'Fault Report' },
+        { key: 'circuit', label: 'Circuit' },
+        { key: 'code', label: 'Code' },
+        { key: 'fix', label: 'Fix Suggestions' },
+      ];
+
   return (
     <div className="history-detail-page">
       <Link to="/history" className="back-link">Back to History</Link>
 
       {meta && (
         <div className="history-detail-header">
-          <h2>Analysis Report</h2>
+          <h2>
+            Analysis Report
+            <span className={`project-type-badge ${isKiCad ? 'kicad' : 'wokwi'}`} style={{ marginLeft: '0.75rem', fontSize: '0.75rem', verticalAlign: 'middle' }}>
+              {isKiCad ? 'KiCad' : 'Wokwi'}
+            </span>
+          </h2>
           <p className="history-detail-meta">
-            <a href={meta.wokwi_url} target="_blank" rel="noopener noreferrer">{meta.wokwi_url}</a>
+            {isKiCad ? (
+              <span>{meta.project_name || 'KiCad Project'}</span>
+            ) : (
+              <a href={meta.wokwi_url} target="_blank" rel="noopener noreferrer">{meta.wokwi_url}</a>
+            )}
             {' '} — {new Date(meta.created_at).toLocaleString()}
           </p>
         </div>
@@ -64,27 +90,31 @@ export default function HistoryDetailPage() {
           <SummaryBar summary={report.summary} />
 
           <nav className="section-nav">
-            {['faults', 'circuit', 'code', 'fix'].map((section) => (
+            {tabs.map(({ key, label }) => (
               <button
-                key={section}
-                className={activeSection === section ? 'active' : ''}
-                onClick={() => setActiveSection(section)}
+                key={key}
+                className={activeSection === key ? 'active' : ''}
+                onClick={() => setActiveSection(key)}
               >
-                {section === 'faults' && 'Fault Report'}
-                {section === 'circuit' && 'Circuit'}
-                {section === 'code' && 'Code'}
-                {section === 'fix' && 'Fix Suggestions'}
+                {label}
               </button>
             ))}
           </nav>
 
           <div className="section-content">
             {activeSection === 'faults' && <FaultReport faults={report.faults} />}
-            {activeSection === 'circuit' && <CircuitViewer diagram={report.diagram} />}
-            {activeSection === 'code' && (
+            {activeSection === 'circuit' && !isKiCad && (
+              <CircuitViewer diagram={report.diagram} />
+            )}
+            {activeSection === 'schematic' && isKiCad && (
+              <SchematicViewer report={report} />
+            )}
+            {activeSection === 'code' && !isKiCad && (
               <CodeView sketchCode={report.sketch_code} faults={report.faults} />
             )}
-            {activeSection === 'fix' && <FixSuggestion report={report} />}
+            {activeSection === 'fix' && (
+              <FixSuggestion report={report} projectType={projectType} />
+            )}
           </div>
         </>
       )}

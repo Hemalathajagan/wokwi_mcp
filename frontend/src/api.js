@@ -178,3 +178,25 @@ export async function healthCheck() {
   const response = await api.get('/health');
   return response.data;
 }
+
+// ---------------------------------------------------------------------------
+// KiCad analysis API
+// ---------------------------------------------------------------------------
+
+export async function uploadKiCadFiles(files) {
+  const formData = new FormData();
+  files.forEach((f) => formData.append('files', f));
+  const response = await api.post('/kicad/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return response.data;
+}
+
+export async function suggestKiCadFix(faultReport, schematicContent = '', pcbContent = '') {
+  const response = await api.post('/kicad/suggest-fix', {
+    fault_report: faultReport,
+    schematic_content: schematicContent,
+    pcb_content: pcbContent,
+  });
+  return response.data;
+}
