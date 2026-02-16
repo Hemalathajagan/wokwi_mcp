@@ -4,7 +4,7 @@ export default function SummaryBar({ summary }) {
   return (
     <div className="summary-bar">
       <div className="summary-item total">
-        <span className="count">{summary.total_faults}</span>
+        <span className="count">{summary.total_faults ?? summary.total ?? 0}</span>
         <span className="label">Total Issues</span>
       </div>
       <div className="summary-item errors">
