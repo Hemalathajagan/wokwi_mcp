@@ -52,7 +52,7 @@ Analyze the circuit for these fault categories:
 - Antenna considerations: nRF24L01 needs 10µF capacitor on VCC-GND for stability
 
 For each fault found, return a JSON object with these fields:
-- "category": one of "wiring", "component", "power", "signal", "wireless", "board_specific"
+- "category": one of "wiring", "component", "power", "signal", "wireless", "board_specific", "intent_mismatch"
 - "severity": "error" (will not work), "warning" (may cause issues), or "info" (best practice)
 - "component": the part ID(s) affected
 - "title": short description (one line)
@@ -62,7 +62,10 @@ For each fault found, return a JSON object with these fields:
 Return ONLY a JSON array of fault objects. If no faults found, return an empty array [].
 Do NOT duplicate findings already in the pre-analysis. Instead, confirm or refute them and add NEW findings."""
 
-CIRCUIT_ANALYSIS_USER = """## Component Pin Reference
+CIRCUIT_ANALYSIS_USER = """## Design Description (User's Intended Behavior)
+{design_description}
+
+## Component Pin Reference
 {component_reference}
 
 ## Diagram.json
@@ -73,7 +76,7 @@ CIRCUIT_ANALYSIS_USER = """## Component Pin Reference
 ## Automated Pre-Analysis Findings
 {rule_findings}
 
-Analyze this circuit for all fault categories. Return a JSON array of faults."""
+Analyze this circuit for all fault categories. If a design description is provided above, compare the actual wiring and pin assignments against the user's stated intent. Flag any mismatches as "intent_mismatch" category faults even if the wiring is electrically valid (e.g., sensor on wrong GPIO, wrong I2C address, components on different pins than described). Return a JSON array of faults."""
 
 
 CODE_ANALYSIS_SYSTEM = """You are an expert Arduino programmer and circuit debugger. Your job is to analyze Arduino sketch code for bugs, with cross-reference to the circuit wiring.
@@ -123,7 +126,7 @@ Analyze for these categories:
 - WiFi code issues: missing WiFi.begin(), wrong SSID/password handling, no connection retry logic
 
 For each issue found, return a JSON object with:
-- "category": one of "code", "cross_reference"
+- "category": one of "code", "cross_reference", "intent_mismatch"
 - "severity": "error", "warning", or "info"
 - "component": affected part ID or pin number
 - "title": short description
@@ -132,7 +135,10 @@ For each issue found, return a JSON object with:
 
 Return ONLY a JSON array of fault objects. If no issues found, return []."""
 
-CODE_ANALYSIS_USER = """## Arduino Sketch Code
+CODE_ANALYSIS_USER = """## Design Description (User's Intended Behavior)
+{design_description}
+
+## Arduino Sketch Code
 ```cpp
 {sketch_code}
 ```
@@ -148,7 +154,7 @@ CODE_ANALYSIS_USER = """## Arduino Sketch Code
 ## Automated Pre-Analysis Findings
 {rule_findings}
 
-Analyze this code against the circuit. Return a JSON array of faults."""
+Analyze this code against the circuit. If a design description is provided above, compare the actual code logic and pin usage against the user's stated intent. Flag any mismatches as "intent_mismatch" category faults. Return a JSON array of faults."""
 
 
 FIX_SUGGESTION_SYSTEM = """You are an expert Arduino engineer. Given a fault report and the original project files, generate corrected versions.
@@ -183,23 +189,25 @@ FIX_SUGGESTION_USER = """## Fault Report
 Generate corrected versions fixing all reported faults. Return JSON."""
 
 
-def build_circuit_analysis_prompt(diagram_json: str, component_reference: str, rule_findings: str) -> tuple[str, str]:
+def build_circuit_analysis_prompt(diagram_json: str, component_reference: str, rule_findings: str, design_description: str = "") -> tuple[str, str]:
     """Build the system and user messages for circuit analysis."""
     user = CIRCUIT_ANALYSIS_USER.format(
         component_reference=component_reference,
         diagram_json=diagram_json,
         rule_findings=rule_findings or "No automated findings.",
+        design_description=design_description or "No description provided.",
     )
     return CIRCUIT_ANALYSIS_SYSTEM, user
 
 
-def build_code_analysis_prompt(sketch_code: str, diagram_json: str, component_reference: str, rule_findings: str) -> tuple[str, str]:
+def build_code_analysis_prompt(sketch_code: str, diagram_json: str, component_reference: str, rule_findings: str, design_description: str = "") -> tuple[str, str]:
     """Build the system and user messages for code analysis."""
     user = CODE_ANALYSIS_USER.format(
         sketch_code=sketch_code,
         diagram_json=diagram_json or "Not provided.",
         component_reference=component_reference,
         rule_findings=rule_findings or "No automated findings.",
+        design_description=design_description or "No description provided.",
     )
     return CODE_ANALYSIS_SYSTEM, user
 

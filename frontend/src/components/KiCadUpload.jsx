@@ -9,6 +9,7 @@ function isAllowed(filename) {
 export default function KiCadUpload({ onAnalyze, loading }) {
   const [files, setFiles] = useState([]);
   const [dragOver, setDragOver] = useState(false);
+  const [description, setDescription] = useState('');
   const inputRef = useRef(null);
 
   const addFiles = (fileList) => {
@@ -33,7 +34,7 @@ export default function KiCadUpload({ onAnalyze, loading }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (files.length > 0) {
-      onAnalyze(files);
+      onAnalyze({ files, description: description.trim() });
     }
   };
 
@@ -96,6 +97,26 @@ export default function KiCadUpload({ onAnalyze, loading }) {
         </button>
       </div>
       <p className="hint">Upload at least one .kicad_sch or .kicad_pcb file to analyze</p>
+
+      <div className="design-description">
+        <label htmlFor="kicad-description">
+          Design Description (optional — helps detect functional wiring mistakes)
+        </label>
+        <textarea
+          id="kicad-description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Describe what your circuit should do, including specific pin assignments..."
+          disabled={loading}
+          rows={3}
+        />
+        <p className="description-examples">
+          Tip: Describe your circuit's purpose and pin connections. Examples:<br />
+          &bull; "ESP32 reads DHT22 sensor on GPIO4, controls relay on GPIO5, OLED on I2C (SDA=21, SCL=22)"<br />
+          &bull; "ATmega328P with 16MHz crystal, 3 LEDs on PB0-PB2, UART to GPS module on PD0/PD1"<br />
+          &bull; "STM32F103 driving stepper motor via A4988: STEP=PA0, DIR=PA1, EN=PA2"
+        </p>
+      </div>
     </form>
   );
 }

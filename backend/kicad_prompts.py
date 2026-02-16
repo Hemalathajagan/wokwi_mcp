@@ -50,7 +50,7 @@ Analyze for these fault categories:
 
 For each fault, return a JSON object with these exact fields:
 {
-  "category": "erc" | "power" | "signal" | "component" | "connectivity",
+  "category": "erc" | "power" | "signal" | "component" | "connectivity" | "intent_mismatch",
   "severity": "error" | "warning" | "info",
   "component": "reference designator or net name",
   "title": "short one-line description",
@@ -106,7 +106,7 @@ Analyze for these fault categories:
 
 For each fault, return a JSON object with these exact fields:
 {
-  "category": "drc" | "manufacturing" | "signal" | "thermal" | "emc",
+  "category": "drc" | "manufacturing" | "signal" | "thermal" | "emc" | "intent_mismatch",
   "severity": "error" | "warning" | "info",
   "component": "reference designator, net name, or location",
   "title": "short one-line description",
@@ -152,14 +152,19 @@ def build_schematic_analysis_prompt(
     parsed_data: dict,
     component_knowledge: str,
     rule_findings: list[dict],
+    design_description: str = "",
 ) -> str:
     """Build the user prompt for schematic AI analysis."""
     symbols_text = _format_symbols(parsed_data.get("symbols", []))
     power_text = _format_power_symbols(parsed_data.get("power_symbols", []))
     nets_text = _format_nets(parsed_data.get("nets", {}))
     findings_text = _format_rule_findings(rule_findings)
+    desc_text = design_description if design_description else "No description provided."
 
-    return f"""## KiCad Schematic Analysis
+    return f"""## Design Description (User's Intended Behavior)
+{desc_text}
+
+## KiCad Schematic Analysis
 
 ### Components ({len(parsed_data.get('symbols', []))} total)
 {symbols_text}
@@ -176,13 +181,14 @@ def build_schematic_analysis_prompt(
 ### Pre-Analysis Findings ({len(rule_findings)} issues found by automated checks)
 {findings_text}
 
-Analyze this schematic for additional issues beyond the pre-analysis findings. Return a JSON array of fault objects."""
+Analyze this schematic for additional issues beyond the pre-analysis findings. If a design description is provided above, compare the actual wiring and pin assignments against the user's stated intent. Flag any mismatches as "intent_mismatch" category faults even if the wiring is electrically valid. Return a JSON array of fault objects."""
 
 
 def build_pcb_analysis_prompt(
     parsed_pcb: dict,
     parsed_sch: dict | None,
     rule_findings: list[dict],
+    design_description: str = "",
 ) -> str:
     """Build the user prompt for PCB AI analysis."""
     footprints_text = _format_footprints(parsed_pcb.get("footprints", []))
@@ -191,13 +197,17 @@ def build_pcb_analysis_prompt(
     vias_summary = _format_vias_summary(parsed_pcb.get("vias", []))
     zones_text = _format_zones(parsed_pcb.get("zones", []))
     findings_text = _format_rule_findings(rule_findings)
+    desc_text = design_description if design_description else "No description provided."
 
     sch_section = ""
     if parsed_sch:
         sch_nets = parsed_sch.get("nets", {})
         sch_section = f"\n### Schematic Nets (for cross-reference)\n{_format_nets(sch_nets)}"
 
-    return f"""## KiCad PCB Layout Analysis
+    return f"""## Design Description (User's Intended Behavior)
+{desc_text}
+
+## KiCad PCB Layout Analysis
 
 ### Footprints ({len(parsed_pcb.get('footprints', []))} components)
 {footprints_text}
@@ -218,7 +228,7 @@ def build_pcb_analysis_prompt(
 ### Pre-Analysis Findings ({len(rule_findings)} issues)
 {findings_text}
 
-Analyze this PCB layout for additional issues. Return a JSON array of fault objects."""
+Analyze this PCB layout for additional issues. If a design description is provided above, compare the actual layout against the user's stated intent and flag mismatches as "intent_mismatch" category faults. Return a JSON array of fault objects."""
 
 
 def build_fix_suggestion_prompt(

@@ -1133,7 +1133,7 @@ async def analyze_code(sketch_code: str, diagram: dict) -> dict:
     return _build_report(diagram or {}, sketch_code, all_faults)
 
 
-async def full_analysis(diagram: dict, sketch_code: str) -> dict:
+async def full_analysis(diagram: dict, sketch_code: str, design_description: str = "") -> dict:
     """Complete analysis: wiring + code + cross-reference."""
     parts = diagram.get("parts", [])
     part_types = [p.get("type", "") for p in parts]
@@ -1158,7 +1158,7 @@ async def full_analysis(diagram: dict, sketch_code: str) -> dict:
 
     try:
         # Circuit analysis
-        sys1, usr1 = build_circuit_analysis_prompt(diagram_json_str, component_ref, rule_findings_text)
+        sys1, usr1 = build_circuit_analysis_prompt(diagram_json_str, component_ref, rule_findings_text, design_description)
         circuit_response = await call_openai(sys1, usr1)
         ai_faults.extend(parse_openai_json(circuit_response))
     except Exception:
@@ -1166,7 +1166,7 @@ async def full_analysis(diagram: dict, sketch_code: str) -> dict:
 
     if sketch_code:
         try:
-            sys2, usr2 = build_code_analysis_prompt(sketch_code, diagram_json_str, code_component_ref, rule_findings_text)
+            sys2, usr2 = build_code_analysis_prompt(sketch_code, diagram_json_str, code_component_ref, rule_findings_text, design_description)
             code_response = await call_openai(sys2, usr2)
             ai_faults.extend(parse_openai_json(code_response))
         except Exception:

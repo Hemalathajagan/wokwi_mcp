@@ -8,6 +8,13 @@ const CATEGORY_LABELS = {
   code: 'Code',
   cross_reference: 'Code-Circuit',
   system: 'System',
+  intent_mismatch: 'Intent Mismatch',
+  erc: 'ERC',
+  drc: 'DRC',
+  connectivity: 'Connectivity',
+  manufacturing: 'Manufacturing',
+  thermal: 'Thermal',
+  emc: 'EMC',
 };
 
 const SEVERITY_COLORS = {

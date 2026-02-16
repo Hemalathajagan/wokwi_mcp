@@ -24,13 +24,13 @@ function Dashboard() {
   const [error, setError] = useState(null);
   const [activeSection, setActiveSection] = useState('faults');
 
-  const handleAnalyze = async (url) => {
+  const handleAnalyze = async ({ url, description }) => {
     setLoading(true);
     setError(null);
     setReport(null);
     setActiveSection('faults');
     try {
-      const result = await analyzeProject(url);
+      const result = await analyzeProject(url, description);
       setReport({ ...result, _projectType: 'wokwi' });
     } catch (err) {
       setError(err.response?.data?.detail || err.message);
@@ -39,13 +39,13 @@ function Dashboard() {
     }
   };
 
-  const handleKiCadAnalyze = async (files) => {
+  const handleKiCadAnalyze = async ({ files, description }) => {
     setLoading(true);
     setError(null);
     setReport(null);
     setActiveSection('faults');
     try {
-      const result = await uploadKiCadFiles(files);
+      const result = await uploadKiCadFiles(files, description);
       setReport({ ...result, _projectType: 'kicad' });
     } catch (err) {
       setError(err.response?.data?.detail || err.message);

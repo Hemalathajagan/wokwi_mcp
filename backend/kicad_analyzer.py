@@ -1266,10 +1266,11 @@ def analyze_pcb_rules(pcb: dict, schematic: dict | None = None) -> list[dict]:
 async def _ai_analyze_schematic(
     schematic: dict,
     rule_findings: list[dict],
+    design_description: str = "",
 ) -> list[dict]:
     """Run AI analysis on schematic beyond rule-based checks."""
     component_knowledge = get_component_knowledge_text(schematic.get("symbols", []))
-    user_prompt = build_schematic_analysis_prompt(schematic, component_knowledge, rule_findings)
+    user_prompt = build_schematic_analysis_prompt(schematic, component_knowledge, rule_findings, design_description)
     raw = await call_openai(KICAD_SCHEMATIC_ANALYSIS_SYSTEM, user_prompt)
     return parse_openai_json(raw)
 
@@ -1278,9 +1279,10 @@ async def _ai_analyze_pcb(
     pcb: dict,
     schematic: dict | None,
     rule_findings: list[dict],
+    design_description: str = "",
 ) -> list[dict]:
     """Run AI analysis on PCB layout beyond rule-based checks."""
-    user_prompt = build_pcb_analysis_prompt(pcb, schematic, rule_findings)
+    user_prompt = build_pcb_analysis_prompt(pcb, schematic, rule_findings, design_description)
     raw = await call_openai(KICAD_PCB_ANALYSIS_SYSTEM, user_prompt)
     return parse_openai_json(raw)
 
@@ -1313,13 +1315,13 @@ def _build_summary(faults: list[dict]) -> dict:
     return summary
 
 
-async def analyze_kicad_schematic(schematic: dict, raw_content: str = "") -> dict:
+async def analyze_kicad_schematic(schematic: dict, raw_content: str = "", design_description: str = "") -> dict:
     """Full schematic analysis: rule-based + AI.
 
     Returns a report dict with faults, summary, and source data.
     """
     rule_faults = analyze_schematic_rules(schematic)
-    ai_faults = await _ai_analyze_schematic(schematic, rule_faults)
+    ai_faults = await _ai_analyze_schematic(schematic, rule_faults, design_description)
     all_faults = rule_faults + ai_faults
 
     return {
@@ -1335,13 +1337,14 @@ async def analyze_kicad_pcb(
     schematic: dict | None = None,
     raw_pcb: str = "",
     raw_sch: str = "",
+    design_description: str = "",
 ) -> dict:
     """Full PCB analysis: rule-based + AI.
 
     Returns a report dict with faults, summary, and source data.
     """
     rule_faults = analyze_pcb_rules(pcb, schematic)
-    ai_faults = await _ai_analyze_pcb(pcb, schematic, rule_faults)
+    ai_faults = await _ai_analyze_pcb(pcb, schematic, rule_faults, design_description)
     all_faults = rule_faults + ai_faults
 
     return {
@@ -1352,7 +1355,7 @@ async def analyze_kicad_pcb(
     }
 
 
-async def full_kicad_analysis(project: KiCadProject) -> dict:
+async def full_kicad_analysis(project: KiCadProject, design_description: str = "") -> dict:
     """Complete KiCad project analysis: schematic + PCB + cross-reference.
 
     Returns a unified report dict.
@@ -1364,7 +1367,7 @@ async def full_kicad_analysis(project: KiCadProject) -> dict:
 
     # Analyze schematic if available
     if project.schematic:
-        sch_report = await analyze_kicad_schematic(project.schematic, project.raw_schematic)
+        sch_report = await analyze_kicad_schematic(project.schematic, project.raw_schematic, design_description)
         all_faults.extend(sch_report.get("faults", []))
         schematic_data = {
             "symbols_count": len(project.schematic.get("symbols", [])),
@@ -1375,7 +1378,7 @@ async def full_kicad_analysis(project: KiCadProject) -> dict:
     # Analyze PCB if available
     if project.pcb:
         pcb_report = await analyze_kicad_pcb(
-            project.pcb, project.schematic, project.raw_pcb, project.raw_schematic
+            project.pcb, project.schematic, project.raw_pcb, project.raw_schematic, design_description
         )
         all_faults.extend(pcb_report.get("faults", []))
         pcb_data = {

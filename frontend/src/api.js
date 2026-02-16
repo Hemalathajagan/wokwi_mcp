@@ -147,8 +147,8 @@ export async function deleteHistoryItem(id) {
 // Existing analysis API
 // ---------------------------------------------------------------------------
 
-export async function analyzeProject(url) {
-  const response = await api.post('/analyze', { url });
+export async function analyzeProject(url, description = '') {
+  const response = await api.post('/analyze', { url, design_description: description });
   return response.data;
 }
 
@@ -183,9 +183,12 @@ export async function healthCheck() {
 // KiCad analysis API
 // ---------------------------------------------------------------------------
 
-export async function uploadKiCadFiles(files) {
+export async function uploadKiCadFiles(files, description = '') {
   const formData = new FormData();
   files.forEach((f) => formData.append('files', f));
+  if (description) {
+    formData.append('design_description', description);
+  }
   const response = await api.post('/kicad/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });

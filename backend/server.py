@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
-from fastapi import FastAPI, File, HTTPException, Depends, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Depends, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -48,6 +48,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 class AnalyzeRequest(BaseModel):
     url: str
+    design_description: str = ""
 
 class CheckWiringRequest(BaseModel):
     diagram_json: str
@@ -127,7 +128,7 @@ async def api_analyze(
     """Fetch a Wokwi project and perform full fault analysis."""
     try:
         project = await fetch_project(req.url)
-        report = await full_analysis(project.diagram, project.sketch_code)
+        report = await full_analysis(project.diagram, project.sketch_code, design_description=req.design_description)
         report["project_id"] = project.project_id
 
         # Save to history
@@ -292,6 +293,7 @@ ALLOWED_KICAD_EXTENSIONS = {".kicad_sch", ".kicad_pcb", ".kicad_pro"}
 @app.post("/api/kicad/upload")
 async def api_kicad_upload(
     files: list[UploadFile] = File(...),
+    design_description: str = Form(""),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -335,7 +337,7 @@ async def api_kicad_upload(
             project_content=project_content,
             project_name=project_name,
         )
-        report = await full_kicad_analysis(project)
+        report = await full_kicad_analysis(project, design_description=design_description)
 
         # Save to history
         summary = report.get("summary", {})
