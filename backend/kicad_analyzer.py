@@ -247,12 +247,28 @@ def _check_power_flag(schematic: dict) -> list[dict]:
     for sym in schematic.get("power_symbols", []):
         val = sym.get("value", "")
         if "PWR_FLAG" in val:
-            # Find which net this PWR_FLAG is on
-            for pin in sym.get("pins", []):
-                pos = pin.get("position", (0, 0))
+            # Find which net this PWR_FLAG is actually connected to
+            flag_ref = sym.get("reference", "")
+            if flag_ref:
                 for net_name, pins_list in nets.items():
-                    flagged_nets.add(net_name)
-                    break
+                    if any(":" in pr and pr.split(":")[0] == flag_ref for pr in pins_list):
+                        flagged_nets.add(net_name)
+            else:
+                # Fallback: match by pin position against wire endpoints
+                for pin in sym.get("pins", []):
+                    pos = pin.get("position", (0, 0))
+                    if _is_point_connected(pos, schematic):
+                        # Find the net by checking which net has a pin at this position
+                        px, py = round(pos[0] * 100), round(pos[1] * 100)
+                        for net_name, pins_list in nets.items():
+                            for s in schematic.get("symbols", []):
+                                for sp in s.get("pins", []):
+                                    sp_pos = sp.get("position", (0, 0))
+                                    if (abs(round(sp_pos[0] * 100) - px) <= 2 and
+                                            abs(round(sp_pos[1] * 100) - py) <= 2):
+                                        s_ref = s.get("reference", "")
+                                        if any(":" in pr and pr.split(":")[0] == s_ref for pr in pins_list):
+                                            flagged_nets.add(net_name)
 
     # Check power nets
     power_net_names = set(POWER_SYMBOLS.keys())
@@ -428,7 +444,9 @@ def _check_led_resistors(schematic: dict) -> list[dict]:
     # Check each LED
     for sym in schematic.get("symbols", []):
         lib_id = sym.get("lib_id", "")
-        if lib_id != "Device:LED":
+        # Match LED variants: Device:LED, Device:LED_Small, Device:LED_RGB, etc.
+        lib_name = lib_id.split(":")[-1] if ":" in lib_id else lib_id
+        if not lib_name.upper().startswith("LED"):
             continue
 
         ref = sym.get("reference", "")
@@ -756,7 +774,7 @@ def _check_pin_type_conflicts(schematic: dict) -> list[dict]:
             if ref and pin_num and etype:
                 pin_types[(ref, pin_num)] = etype
 
-    output_types = {"output", "power_out"}
+    output_types = {"output", "power_out", "open_collector", "open_emitter"}
 
     for net_name, pin_refs in nets.items():
         # Collect electrical types of all pins on this net
@@ -1303,6 +1321,19 @@ async def _ai_analyze_pcb(
 # Main analysis functions
 # ---------------------------------------------------------------------------
 
+def _deduplicate_faults(faults: list[dict]) -> list[dict]:
+    """Remove duplicate faults by normalized title and component+category overlap."""
+    seen_titles: set[str] = set()
+    unique: list[dict] = []
+    for f in faults:
+        title = f.get("title", "").strip().lower()
+        if title in seen_titles:
+            continue
+        seen_titles.add(title)
+        unique.append(f)
+    return unique
+
+
 def _build_summary(faults: list[dict]) -> dict:
     """Build a summary dict from fault list."""
     summary = {
@@ -1334,7 +1365,7 @@ async def analyze_kicad_schematic(schematic: dict, raw_content: str = "", design
     """
     rule_faults = analyze_schematic_rules(schematic)
     ai_faults = await _ai_analyze_schematic(schematic, rule_faults, design_description)
-    all_faults = rule_faults + ai_faults
+    all_faults = _deduplicate_faults(rule_faults + ai_faults)
 
     return {
         "project_type": "kicad",
@@ -1357,7 +1388,7 @@ async def analyze_kicad_pcb(
     """
     rule_faults = analyze_pcb_rules(pcb, schematic)
     ai_faults = await _ai_analyze_pcb(pcb, schematic, rule_faults, design_description)
-    all_faults = rule_faults + ai_faults
+    all_faults = _deduplicate_faults(rule_faults + ai_faults)
 
     return {
         "project_type": "kicad",

@@ -145,6 +145,13 @@ def _breadboard_pin_group(pin: str) -> str | None:
         section = "left" if col in "abcde" else "right"
         return f"{row}_{section}"
 
+    # Column-first format: {col}{row} like "a5", "j12"
+    m = re.match(r'^([a-j])(\d+)$', pin)
+    if m:
+        col, row = m.group(1), m.group(2)
+        section = "left" if col in "abcde" else "right"
+        return f"{row}_{section}"
+
     return None
 
 
@@ -328,8 +335,8 @@ def _check_led_polarity(parts: list[dict], adjacency: dict) -> list[dict]:
                 ncomp = COMPONENT_PINS.get(ntype, {})
                 npin_info = ncomp.get("pins", {}).get(npin, {})
                 pin_type = npin_info.get("type", "")
-                # Cathode connected to a power pin or digital output = likely reversed
-                if pin_type in ("power", "digital"):
+                # Cathode connected to a power (VCC/5V) pin = definitely reversed
+                if pin_type == "power":
                     faults.append({
                         "category": "wiring",
                         "severity": "error",
@@ -1320,11 +1327,11 @@ async def suggest_fixes(fault_report: str, diagram: dict, sketch_code: str) -> d
 
 def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
     """Build the standardized analysis report."""
-    # Deduplicate faults by title
+    # Deduplicate faults by normalized title (case-insensitive)
     seen_titles = set()
     unique_faults = []
     for f in faults:
-        title = f.get("title", "")
+        title = f.get("title", "").strip().lower()
         if title not in seen_titles:
             seen_titles.add(title)
             unique_faults.append(f)

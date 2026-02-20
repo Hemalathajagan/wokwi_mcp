@@ -19,7 +19,7 @@ COMPONENT_PINS = {
             "10": {"type": "digital", "pwm": True, "direction": "io"},
             "11": {"type": "digital", "pwm": True, "direction": "io"},
             "12": {"type": "digital", "pwm": False, "direction": "io"},
-            "13": {"type": "digital", "pwm": True, "direction": "io"},
+            "13": {"type": "digital", "pwm": False, "direction": "io"},
             "A0": {"type": "analog", "direction": "input"},
             "A1": {"type": "analog", "direction": "input"},
             "A2": {"type": "analog", "direction": "input"},
