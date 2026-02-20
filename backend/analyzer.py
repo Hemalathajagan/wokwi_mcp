@@ -115,6 +115,115 @@ def parse_openai_json(text: str) -> list[dict]:
 # Rule-based analysis helpers
 # ---------------------------------------------------------------------------
 
+def _breadboard_pin_group(pin: str) -> str | None:
+    """Determine the electrical group of a breadboard pin.
+
+    Pins in the same group are internally connected on the breadboard.
+    Returns a group key string, or None if the pin format is unrecognized.
+    """
+    # Power rail: tp.N, tn.N, bp.N, bn.N (top/bottom positive/negative)
+    m = re.match(r'^([tb][pn])\.\d+$', pin)
+    if m:
+        return m.group(1)
+
+    # Alt power rail: +N or -N
+    m = re.match(r'^([+-])\d+$', pin)
+    if m:
+        return "pos" if m.group(1) == "+" else "neg"
+
+    # Terminal strip with half: {row}{half}.{col} like "25t.d" or "3b.a"
+    m = re.match(r'^(\d+)([tb])\.([a-j])$', pin)
+    if m:
+        row, half, col = m.group(1), m.group(2), m.group(3)
+        section = "left" if col in "abcde" else "right"
+        return f"{row}{half}_{section}"
+
+    # Simple format: {row}{col} like "5a", "12j"
+    m = re.match(r'^(\d+)([a-j])$', pin)
+    if m:
+        row, col = m.group(1), m.group(2)
+        section = "left" if col in "abcde" else "right"
+        return f"{row}_{section}"
+
+    return None
+
+
+def _expand_breadboard_connections(adjacency: dict, parts: list[dict]) -> dict:
+    """Expand adjacency graph to resolve breadboard internal connections.
+
+    When two component pins connect to the same breadboard row/rail,
+    this function makes them direct neighbors in the adjacency graph.
+    This allows all one-hop checks to work through breadboard connections.
+    """
+    # Identify breadboard parts
+    bb_parts = set()
+    for p in parts:
+        ptype = p.get("type", "")
+        if "breadboard" in ptype.lower():
+            bb_parts.add(p["id"])
+
+    if not bb_parts:
+        return adjacency  # No breadboards, nothing to expand
+
+    # Add internal breadboard connections (same row/rail)
+    # Group breadboard pin endpoints by their internal group
+    bb_groups: dict[str, list[str]] = defaultdict(list)
+    for endpoint in adjacency:
+        if ":" not in endpoint:
+            continue
+        part_id, pin = endpoint.split(":", 1)
+        if part_id in bb_parts:
+            group = _breadboard_pin_group(pin)
+            if group:
+                bb_groups[f"{part_id}:{group}"].append(endpoint)
+
+    # Build expanded adjacency
+    expanded = defaultdict(set)
+    for ep, neighbors in adjacency.items():
+        expanded[ep] = set(neighbors)
+
+    # Connect all breadboard pins in the same group to each other
+    for group_key, endpoints in bb_groups.items():
+        for i in range(len(endpoints)):
+            for j in range(i + 1, len(endpoints)):
+                expanded[endpoints[i]].add(endpoints[j])
+                expanded[endpoints[j]].add(endpoints[i])
+
+    # Collapse breadboard paths: for each component pin, BFS through
+    # breadboard-only pins to find reachable component pins
+    for start_ep in list(expanded.keys()):
+        if ":" not in start_ep:
+            continue
+        start_part = start_ep.split(":")[0]
+        if start_part in bb_parts:
+            continue  # Only start from component pins, not breadboard pins
+
+        # BFS through breadboard pins only
+        visited = {start_ep}
+        queue = []
+        for neighbor in expanded.get(start_ep, set()):
+            if ":" in neighbor and neighbor.split(":")[0] in bb_parts:
+                queue.append(neighbor)
+                visited.add(neighbor)
+
+        while queue:
+            current = queue.pop(0)
+            for neighbor in expanded.get(current, set()):
+                if neighbor in visited:
+                    continue
+                visited.add(neighbor)
+                if ":" in neighbor:
+                    npart = neighbor.split(":")[0]
+                    if npart in bb_parts:
+                        queue.append(neighbor)  # Continue through breadboard
+                    else:
+                        # Found a component pin — add as direct neighbor
+                        expanded[start_ep].add(neighbor)
+                        expanded[neighbor].add(start_ep)
+
+    return dict(expanded)
+
+
 def _build_connection_graph(diagram: dict) -> tuple[dict, set, dict]:
     """Parse diagram connections into useful data structures.
 
@@ -124,6 +233,7 @@ def _build_connection_graph(diagram: dict) -> tuple[dict, set, dict]:
         pin_connections: dict mapping "partId:pin" -> list of connections it appears in
     """
     connections = diagram.get("connections", [])
+    parts = diagram.get("parts", [])
     adjacency = defaultdict(set)
     connected_parts = set()
     pin_connections = defaultdict(list)
@@ -143,7 +253,10 @@ def _build_connection_graph(diagram: dict) -> tuple[dict, set, dict]:
         if ":" in tgt:
             connected_parts.add(tgt.split(":")[0])
 
-    return dict(adjacency), connected_parts, dict(pin_connections)
+    # Expand through breadboard internal connections
+    adjacency = _expand_breadboard_connections(dict(adjacency), parts)
+
+    return adjacency, connected_parts, dict(pin_connections)
 
 
 def _check_unconnected_parts(parts: list[dict], connected_parts: set) -> list[dict]:

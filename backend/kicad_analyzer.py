@@ -105,10 +105,11 @@ def _check_unconnected_pins(schematic: dict) -> list[dict]:
                 continue
 
             # Check if pin position matches any wire endpoint, label, or other pin
-            connected = _is_point_connected(pos, schematic)
+            pin_num = pin.get("number", "")
+            connected = _is_point_connected(pos, schematic,
+                                            exclude_ref=ref, exclude_pin=pin_num)
             if not connected:
                 pin_name = pin.get("name", "")
-                pin_num = pin.get("number", "")
                 pin_type = pin.get("electrical_type", "")
                 # Skip power_in pins on ICs that are likely handled by the power check
                 pin_desc = f"pin {pin_num}" + (f" ({pin_name})" if pin_name else "")
@@ -131,8 +132,9 @@ def _check_unconnected_pins(schematic: dict) -> list[dict]:
     return faults
 
 
-def _is_point_connected(pos: tuple[float, float], schematic: dict) -> bool:
-    """Check if a point is connected to any wire endpoint, label, or junction."""
+def _is_point_connected(pos: tuple[float, float], schematic: dict,
+                        exclude_ref: str = "", exclude_pin: str = "") -> bool:
+    """Check if a point is connected to any wire endpoint, label, junction, or other pin."""
     px, py = round(pos[0] * 100), round(pos[1] * 100)
     tolerance = 2  # 0.02mm tolerance
 
@@ -152,6 +154,16 @@ def _is_point_connected(pos: tuple[float, float], schematic: dict) -> bool:
     # Check power symbol pins
     for psym in schematic.get("power_symbols", []):
         for pin in psym.get("pins", []):
+            pp = pin.get("position", (0, 0))
+            if abs(round(pp[0] * 100) - px) <= tolerance and abs(round(pp[1] * 100) - py) <= tolerance:
+                return True
+
+    # Check other component pins (pin-to-pin connection without wire)
+    for sym in schematic.get("symbols", []):
+        sym_ref = sym.get("reference", "")
+        for pin in sym.get("pins", []):
+            if sym_ref == exclude_ref and pin.get("number", "") == exclude_pin:
+                continue
             pp = pin.get("position", (0, 0))
             if abs(round(pp[0] * 100) - px) <= tolerance and abs(round(pp[1] * 100) - py) <= tolerance:
                 return True

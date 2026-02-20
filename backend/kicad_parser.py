@@ -125,8 +125,13 @@ def _rotate_point(x: float, y: float, angle_deg: float) -> tuple[float, float]:
 # Schematic parser (.kicad_sch)
 # ---------------------------------------------------------------------------
 
-def _parse_lib_symbol_pins(lib_symbol: list) -> list[dict]:
-    """Extract pin definitions from a lib_symbols symbol definition."""
+def _parse_lib_symbol_pins(lib_symbol: list, unit: int = 0) -> list[dict]:
+    """Extract pin definitions from a lib_symbols symbol definition.
+
+    Args:
+        lib_symbol: The S-expression list for the symbol.
+        unit: The unit number this sub-symbol belongs to (0 = shared/top-level).
+    """
     pins = []
     for item in lib_symbol:
         if isinstance(item, list) and len(item) > 0:
@@ -134,6 +139,7 @@ def _parse_lib_symbol_pins(lib_symbol: list) -> list[dict]:
                 pin_info: dict[str, Any] = {
                     "electrical_type": item[1] if len(item) > 1 else "passive",
                     "shape": item[2] if len(item) > 2 else "",
+                    "unit": unit,
                 }
                 at_node = _find_node(item, 'at')
                 if at_node:
@@ -152,8 +158,17 @@ def _parse_lib_symbol_pins(lib_symbol: list) -> list[dict]:
                 pin_info["number"] = number_node[1] if number_node and len(number_node) > 1 else ""
                 pins.append(pin_info)
             elif item[0] == 'symbol':
-                # Sub-symbol (unit) — recurse to find pins inside
-                pins.extend(_parse_lib_symbol_pins(item))
+                # Sub-symbol (unit) — parse unit number from name
+                # KiCad sub-symbol names follow: "LibId_UnitNum_StyleNum"
+                sub_name = item[1] if len(item) > 1 else ""
+                sub_unit = 0
+                parts = sub_name.rsplit("_", 2)
+                if len(parts) >= 3:
+                    try:
+                        sub_unit = int(parts[-2])
+                    except ValueError:
+                        sub_unit = 0
+                pins.extend(_parse_lib_symbol_pins(item, unit=sub_unit))
     return pins
 
 
@@ -161,7 +176,7 @@ def _compute_pin_endpoint(pin: dict) -> tuple[float, float]:
     """Compute the connection endpoint of a pin (tip of the pin line)."""
     length = pin.get("length", 2.54)
     rot = pin.get("rotation", 0.0)
-    dx, dy = _rotate_point(length, 0, rot)
+    dx, dy = _rotate_point(length, 0, -rot)
     return (pin["x"] + dx, pin["y"] + dy)
 
 
@@ -176,7 +191,7 @@ def _compute_absolute_pin_position(
         px = -px
     if mirror_y:
         py = -py
-    rx, ry = _rotate_point(px, py, symbol_rot)
+    rx, ry = _rotate_point(px, py, -symbol_rot)
     return (symbol_x + rx, symbol_y + ry)
 
 
@@ -266,10 +281,13 @@ def parse_kicad_sch(content: str) -> dict:
         lib_sym = result["lib_symbols"].get(lib_id, {})
         is_power = lib_sym.get("is_power", False)
 
-        # Compute absolute pin positions
+        # Compute absolute pin positions (filter by unit for multi-unit symbols)
         lib_pins = lib_sym.get("pins", [])
         abs_pins = []
         for pin in lib_pins:
+            pin_unit = pin.get("unit", 0)
+            if pin_unit != 0 and pin_unit != unit:
+                continue
             endpoint = _compute_pin_endpoint(pin)
             abs_pos = _compute_absolute_pin_position(
                 x, y, rot, mirror_x, mirror_y,
