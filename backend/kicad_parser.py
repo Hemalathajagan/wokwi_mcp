@@ -288,10 +288,12 @@ def parse_kicad_sch(content: str) -> dict:
             pin_unit = pin.get("unit", 0)
             if pin_unit != 0 and pin_unit != unit:
                 continue
-            endpoint = _compute_pin_endpoint(pin)
+            # Pin (at x y rot) in lib coords IS the connection tip (where wires attach).
+            # _compute_pin_endpoint returns the body end (tip + length), which is wrong
+            # for connectivity matching — use the raw lib coords directly.
             abs_pos = _compute_absolute_pin_position(
                 x, y, rot, mirror_x, mirror_y,
-                endpoint[0], endpoint[1],
+                pin["x"], pin["y"],
             )
             abs_pins.append({
                 "name": pin.get("name", ""),
