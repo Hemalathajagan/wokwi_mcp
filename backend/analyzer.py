@@ -301,6 +301,12 @@ def _check_invalid_pins(parts: list[dict], connections: list) -> list[dict]:
             if part_id not in parts_map:
                 continue
             ptype = parts_map[part_id].get("type", "")
+            # Never validate breadboard component pins — hole addresses (1a, tp.5, +3)
+            # are dynamically addressed and have no fixed pin list.
+            if "breadboard" in ptype.lower():
+                continue
+            if re.match(r'^(\d+[a-j]|[tb][pn]\.\d+|[+-]\d+)$', pin_name):
+                continue
             comp_info = COMPONENT_PINS.get(ptype)
             if comp_info and pin_name not in comp_info["pins"]:
                 faults.append({
@@ -349,6 +355,37 @@ def _check_led_polarity(parts: list[dict], adjacency: dict) -> list[dict]:
     return faults
 
 
+def _find_resistor_on_path(start_key: str, adjacency: dict, parts_map: dict,
+                           max_hops: int = 2) -> bool:
+    """BFS up to max_hops from start_key looking for a wokwi-resistor.
+
+    Traverses through non-board component pins as well as breadboard nodes so
+    that resistors reachable via power rails or multi-row breadboard paths are
+    detected even when they are not a direct adjacency neighbour of the LED pin.
+    """
+    visited: set[str] = {start_key}
+    frontier = list(adjacency.get(start_key, []))
+    for _ in range(max_hops):
+        next_frontier: list[str] = []
+        for node in frontier:
+            if node in visited or ":" not in node:
+                continue
+            visited.add(node)
+            npart_id = node.split(":")[0]
+            if npart_id in parts_map:
+                ntype = parts_map[npart_id].get("type", "")
+                if ntype == "wokwi-resistor":
+                    return True
+                # Continue traversal only through non-board component pins
+                if ntype not in SUPPORTED_BOARDS:
+                    next_frontier.extend(adjacency.get(node, []))
+            else:
+                # Breadboard node or unknown — keep traversing
+                next_frontier.extend(adjacency.get(node, []))
+        frontier = next_frontier
+    return False
+
+
 def _check_led_resistor(parts: list[dict], adjacency: dict) -> list[dict]:
     """Check if LEDs are connected directly to Arduino pins without a resistor."""
     faults = []
@@ -363,32 +400,18 @@ def _check_led_resistor(parts: list[dict], adjacency: dict) -> list[dict]:
         anode_pins = ["A"] if part["type"] == "wokwi-led" else ["R", "G", "B"]
         for apin in anode_pins:
             anode_key = f"{pid}:{apin}"
-            has_resistor = False
 
-            # Walk one hop from the anode - check if it connects to a resistor
-            for neighbor in adjacency.get(anode_key, []):
-                if ":" not in neighbor:
-                    continue
-                npart_id = neighbor.split(":")[0]
-                if npart_id in parts_map:
-                    ntype = parts_map[npart_id].get("type", "")
-                    if ntype == "wokwi-resistor":
-                        has_resistor = True
-                        break
+            # BFS up to 2 hops from anode — catches resistors through breadboard rows,
+            # power rails, and multi-segment paths that a single-hop check would miss.
+            has_resistor = _find_resistor_on_path(anode_key, adjacency, parts_map)
 
-            # Also check cathode side for resistor
+            # Also check cathode side for resistor (resistor between LED and GND)
             if not has_resistor:
                 cathode_key = f"{pid}:C" if part["type"] == "wokwi-led" else f"{pid}:COM"
-                for neighbor in adjacency.get(cathode_key, []):
-                    if ":" not in neighbor:
-                        continue
-                    npart_id = neighbor.split(":")[0]
-                    if npart_id in parts_map and parts_map[npart_id].get("type") == "wokwi-resistor":
-                        has_resistor = True
-                        break
+                has_resistor = _find_resistor_on_path(cathode_key, adjacency, parts_map)
 
             if not has_resistor:
-                # Check if it's connected to an Arduino pin (not just floating)
+                # Only flag error if the LED is actually driven by a board pin
                 for neighbor in adjacency.get(anode_key, []):
                     if ":" not in neighbor:
                         continue

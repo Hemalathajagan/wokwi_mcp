@@ -6,6 +6,7 @@ signal integrity problems, and manufacturing concerns.
 
 import json
 import math
+import re
 from collections import defaultdict
 
 from analyzer import call_openai, parse_openai_json
@@ -136,7 +137,7 @@ def _is_point_connected(pos: tuple[float, float], schematic: dict,
                         exclude_ref: str = "", exclude_pin: str = "") -> bool:
     """Check if a point is connected to any wire endpoint, label, junction, or other pin."""
     px, py = round(pos[0] * 100), round(pos[1] * 100)
-    tolerance = 2  # 0.02mm tolerance
+    tolerance = 5  # 0.05mm — relaxed from 0.02mm to tolerate parser float rounding
 
     # Check wire endpoints
     for wire in schematic.get("wires", []):
@@ -149,6 +150,15 @@ def _is_point_connected(pos: tuple[float, float], schematic: dict,
     for label in schematic.get("labels", []):
         lx, ly = label.get("position", (0, 0))
         if abs(round(lx * 100) - px) <= tolerance and abs(round(ly * 100) - py) <= tolerance:
+            return True
+
+    # Check explicit junctions (T-intersection wire nodes in KiCad)
+    for jct in schematic.get("junctions", []):
+        if isinstance(jct, (list, tuple)):
+            jx, jy = jct[0], jct[1]
+        else:
+            jx, jy = jct.get("x", 0), jct.get("y", 0)
+        if abs(round(jx * 100) - px) <= tolerance and abs(round(jy * 100) - py) <= tolerance:
             return True
 
     # Check power symbol pins
@@ -434,12 +444,13 @@ def _check_led_resistors(schematic: dict) -> list[dict]:
     faults = []
     nets = schematic.get("nets", {})
 
-    # Find all resistors
+    # Find all resistors by lib_id OR by standard reference prefix (R1, R2, …)
     resistor_refs: set[str] = set()
     for sym in schematic.get("symbols", []):
         lib_id = sym.get("lib_id", "")
-        if "Device:R" in lib_id:
-            resistor_refs.add(sym.get("reference", ""))
+        ref = sym.get("reference", "")
+        if "Device:R" in lib_id or re.match(r'^R\d', ref):
+            resistor_refs.add(ref)
 
     # Check each LED
     for sym in schematic.get("symbols", []):
@@ -689,9 +700,11 @@ def _check_uart_crossover(schematic: dict) -> list[dict]:
             if ":" not in pin_ref:
                 continue
             ref, rest = pin_ref.split(":", 1)
-            pin_name = ""
             if "(" in rest and ")" in rest:
                 pin_name = rest.split("(")[1].rstrip(")")
+            else:
+                # No parenthetical name — use the raw pin identifier (e.g., "TX", "18")
+                pin_name = rest.split("(")[0].strip()
 
             upper_pin = pin_name.upper()
             if upper_pin in _UART_TX_PIN_NAMES:
@@ -790,7 +803,13 @@ def _check_pin_type_conflicts(schematic: dict) -> list[dict]:
 
         # Count output-type pins on this net
         output_pins = [(r, p, t) for r, p, t in types_on_net if t in output_types]
-        if len(output_pins) >= 2:
+        open_types = {"open_collector", "open_emitter"}
+        # Wired-AND/OR with open-collector or open-emitter outputs sharing a net is valid
+        # (e.g., I²C SDA, 1-Wire). Only flag when at least one push-pull output is involved.
+        # Skip UART TX/RX nets — _check_uart_crossover already reports those more precisely,
+        # so a generic "output conflict" here would be redundant noise.
+        is_uart_net = net_name.upper() in (_UART_TX_PIN_NAMES | _UART_RX_PIN_NAMES)
+        if len(output_pins) >= 2 and not all(t in open_types for _, _, t in output_pins) and not is_uart_net:
             refs_str = ", ".join(f"{r} pin {p} ({t})" for r, p, t in output_pins)
             faults.append({
                 "category": "erc",
@@ -799,8 +818,8 @@ def _check_pin_type_conflicts(schematic: dict) -> list[dict]:
                 "title": f"Output conflict on net '{net_name}': {len(output_pins)} outputs driving same net",
                 "explanation": (
                     f"Net '{net_name}' has {len(output_pins)} output/power_out pins connected: "
-                    f"{refs_str}. Multiple outputs driving the same net causes bus contention "
-                    f"and can damage components."
+                    f"{refs_str}. Multiple push-pull outputs driving the same net causes bus "
+                    f"contention and can damage components."
                 ),
                 "fix": {
                     "type": "schematic",
@@ -1256,6 +1275,69 @@ def _check_power_traces(pcb: dict) -> list[dict]:
 # Aggregate rule runners
 # ---------------------------------------------------------------------------
 
+def _suppress_noise_faults(faults: list[dict]) -> list[dict]:
+    """Suppress generic faults already covered by a more specific fault.
+
+    Handles three known cross-check overlaps:
+
+    1. PWR_FLAG warning fires on the same net as a more specific fault
+       (voltage mismatch, missing decoupling cap, or single-pin net).
+       The specific fault is more actionable; the PWR_FLAG warning is noise.
+
+    2. Unconnected-pin warnings fire for every pin of a component that has
+       a duplicate-reference fault.  Duplicate refs make the connectivity
+       analysis unreliable, so those unconnected-pin faults are noise.
+
+    3. (UART TX/RX — handled earlier in _check_pin_type_conflicts.)
+    """
+    # Collect net names that already have a specific fault
+    specific_fault_nets: set[str] = set()
+    # Collect refs that have a duplicate-reference fault
+    dup_ref_components: set[str] = set()
+
+    for f in faults:
+        title = f.get("title", "")
+
+        # "Voltage mismatch: REF on NETNAME (5.0V > ...)"
+        if title.lower().startswith("voltage mismatch") and " on " in title:
+            net = title.split(" on ", 1)[1].split(" ")[0]
+            specific_fault_nets.add(net)
+
+        # "Missing decoupling capacitor for REF on NETNAME"
+        elif "decoupling" in title.lower() and " on " in title:
+            net = title.rsplit(" on ", 1)[-1].strip()
+            specific_fault_nets.add(net)
+
+        # "Single-pin net 'NETNAME' — possible label typo"
+        elif "single-pin net" in title.lower() and "'" in title:
+            net = title.split("'")[1]
+            specific_fault_nets.add(net)
+
+        # "Duplicate reference designator: REF (appears N times)"
+        elif "duplicate reference" in title.lower():
+            dup_ref_components.add(f.get("component", ""))
+
+    result = []
+    for f in faults:
+        title = f.get("title", "")
+
+        # Suppress PWR_FLAG warning when a specific fault already covers that net
+        if "pwr_flag" in title.lower() and "'" in title:
+            net = title.split("'")[1]
+            if net in specific_fault_nets:
+                continue
+
+        # Suppress unconnected-pin faults for components with duplicate refs
+        # (the duplicate makes pin-to-net mapping ambiguous, causing false positives)
+        if "unconnected" in title.lower():
+            if f.get("component", "") in dup_ref_components:
+                continue
+
+        result.append(f)
+
+    return result
+
+
 def analyze_schematic_rules(schematic: dict) -> list[dict]:
     """Run all schematic ERC rule-based checks."""
     faults = []
@@ -1273,7 +1355,7 @@ def analyze_schematic_rules(schematic: dict) -> list[dict]:
     faults.extend(_check_pin_type_conflicts(schematic))
     faults.extend(_check_footprint_pad_mismatch(schematic))
     faults.extend(_check_lib_symbol_issues(schematic))
-    return faults
+    return _suppress_noise_faults(faults)
 
 
 def analyze_pcb_rules(pcb: dict, schematic: dict | None = None) -> list[dict]:
