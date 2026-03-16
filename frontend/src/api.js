@@ -189,9 +189,7 @@ export async function uploadKiCadFiles(files, description = '') {
   if (description) {
     formData.append('design_description', description);
   }
-  const response = await api.post('/kicad/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+  const response = await api.post('/kicad/upload', formData);
   return response.data;
 }
 
