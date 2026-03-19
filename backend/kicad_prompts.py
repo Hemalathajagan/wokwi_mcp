@@ -58,7 +58,13 @@ For each fault, return a JSON object with these exact fields:
   "fix": {"type": "schematic", "description": "specific steps to fix the issue"}
 }
 
-Return ONLY a JSON array of fault objects. Do NOT duplicate findings already reported in the pre-analysis. Focus on issues the automated checks may have missed."""
+Return ONLY a JSON array of fault objects. Do NOT duplicate findings already reported in the pre-analysis. Focus on issues the automated checks may have missed.
+
+IMPORTANT — avoid these known false positive patterns:
+- Do NOT flag "missing current-limiting resistor" for an LED that already has an unconnected pin in the pre-analysis. The broken wire is the root cause; the resistor exists but is simply not wired yet.
+- Do NOT re-report unconnected pin issues already listed in the pre-analysis under any alternative wording (e.g. "floating pin", "pin without no-connect marker", "open pin"). If it is already in pre-analysis, skip it entirely.
+- Do NOT flag GND net connectivity as an error. GND is the reference potential; it is always correctly defined when GND power symbols are present in the schematic.
+- Do NOT flag a correctly-wired LED (one whose anode net contains a resistor) as missing a current-limiting resistor."""
 
 
 KICAD_PCB_ANALYSIS_SYSTEM = """You are an expert PCB layout engineer. Analyze a KiCad PCB layout for manufacturing, signal integrity, and reliability issues following professional DRC (Design Rule Check) standards.

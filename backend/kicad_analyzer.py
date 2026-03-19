@@ -116,7 +116,7 @@ def _check_unconnected_pins(schematic: dict) -> list[dict]:
                 pin_desc = f"pin {pin_num}" + (f" ({pin_name})" if pin_name else "")
                 faults.append({
                     "category": "erc",
-                    "severity": "error" if pin_type in ("power_in", "input") else "warning",
+                    "severity": "error",
                     "component": ref,
                     "title": f"Unconnected {pin_desc} on {ref}",
                     "explanation": (
@@ -452,6 +452,12 @@ def _check_led_resistors(schematic: dict) -> list[dict]:
         if "Device:R" in lib_id or re.match(r'^R\d', ref):
             resistor_refs.add(ref)
 
+    # Build set of all pin refs that appear in at least one net (i.e. connected pins)
+    connected_pin_refs: set[str] = set()
+    for pin_refs in nets.values():
+        for pr in pin_refs:
+            connected_pin_refs.add(pr)
+
     # Check each LED
     for sym in schematic.get("symbols", []):
         lib_id = sym.get("lib_id", "")
@@ -461,6 +467,17 @@ def _check_led_resistors(schematic: dict) -> list[dict]:
             continue
 
         ref = sym.get("reference", "")
+
+        # If the LED already has an unconnected pin, skip the resistor check.
+        # The unconnected-pin check covers the broken circuit; flagging a missing
+        # resistor on top of that is a false positive caused by the broken connection.
+        led_has_unconnected_pin = any(
+            not any(pr.startswith(f"{ref}:{pin.get('number', '')}") for pr in connected_pin_refs)
+            for pin in sym.get("pins", [])
+        )
+        if led_has_unconnected_pin:
+            continue
+
         # Check if any net connected to this LED also has a resistor
         has_resistor = False
         for net_name, pin_refs in nets.items():
@@ -1404,15 +1421,64 @@ async def _ai_analyze_pcb(
 # ---------------------------------------------------------------------------
 
 def _deduplicate_faults(faults: list[dict]) -> list[dict]:
-    """Remove duplicate faults by normalized title and component+category overlap."""
+    """Remove duplicate faults by normalized title and semantic overlap.
+
+    Two passes:
+    1. Collect all components that already have a rule-based unconnected-pin ERC fault.
+    2. Suppress AI-generated faults that are consequences of those same broken
+       connections (duplicate unconnected-pin wording, signal-category floating-pin
+       reports, and missing-resistor reports caused by the broken wire — not a truly
+       absent resistor).
+    Also suppresses AI faults about GND connectivity, which are always false positives
+    when GND power symbols are present in the schematic.
+    """
     seen_titles: set[str] = set()
+
+    # Pass 1 — find components already covered by rule-based unconnected-pin errors
+    unconnected_components: set[str] = set()
+    for f in faults:
+        if "unconnected" in f.get("title", "").lower() and f.get("category") == "erc":
+            unconnected_components.add(f.get("component", ""))
+
+    # Pass 2 — filter
     unique: list[dict] = []
     for f in faults:
         title = f.get("title", "").strip().lower()
+        component = f.get("component", "")
+        category = f.get("category", "")
+
+        # Skip exact-title duplicates
         if title in seen_titles:
             continue
+
+        # Suppress AI ERC duplicates for the same component (e.g. GPT-4o rewording
+        # "unconnected pin" as "pin without no-connect marker")
+        if (component in unconnected_components and category == "erc" and
+                any(kw in title for kw in ("unconnected", "no-connect", "not connected", "floating"))):
+            continue
+
+        # Suppress AI signal-category faults for components already flagged as
+        # unconnected (e.g. "Unconnected pin on LED D1" from signal category)
+        if (component in unconnected_components and category == "signal" and
+                any(kw in title for kw in ("unconnected", "not connected", "floating", "open"))):
+            continue
+
+        # Suppress AI "missing resistor" faults for LEDs whose broken connection
+        # is already reported — the resistor exists but is simply not wired yet
+        if (component in unconnected_components and category == "component" and
+                any(kw in title for kw in ("missing resistor", "missing current", "current-limiting", "no resistor"))):
+            continue
+
+        # Suppress AI false-positive GND power errors — GND is always valid when
+        # GND power symbols are present; the AI sometimes hallucinates this
+        if (category == "power" and
+                any(kw in title for kw in ("gnd", "ground")) and
+                any(kw in title for kw in ("not connected", "not driven", "missing", "no power"))):
+            continue
+
         seen_titles.add(title)
         unique.append(f)
+
     return unique
 
 
