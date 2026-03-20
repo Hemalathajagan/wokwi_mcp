@@ -1515,35 +1515,25 @@ async def analyze_kicad_schematic(schematic: dict, raw_content: str = "", design
     rule_faults = analyze_schematic_rules(schematic)
     ai_faults = await _ai_analyze_schematic(schematic, rule_faults, design_description)
 
-    # Suppress AI-generated "missing resistor" false positives for LEDs that the
-    # rule-based checker has already cleared.  The rule-based checker has precise
-    # wire-level connectivity; if it did NOT flag an LED for a missing resistor,
-    # the LED really does have one.  The AI often hallucinates resistor warnings
-    # for connector-driven LED circuits (no VCC net visible) even when the
-    # resistors are present.
+    # Strip ALL AI LED resistor faults — rule-based _check_led_resistors is the
+    # authoritative source for this check (wire-level connectivity precision).
+    # The AI has two known failure modes here:
+    #   1. False positives: flags LEDs that DO have resistors (connector-driven
+    #      circuits with no visible VCC net confuse the AI).
+    #   2. Wrong severity: AI emits "warning" but the correct level is "error".
+    # Suppressing AI LED resistor faults entirely avoids both problems.
     _resistor_kws = ("current-limiting", "missing resistor", "current limiting", "no resistor")
 
-    # LEDs explicitly flagged by rule-based for missing resistors
-    rule_flagged_led_resistors: set[str] = {
-        f["component"] for f in rule_faults
-        if f.get("category") == "component"
-        and any(kw in f.get("title", "").lower() for kw in _resistor_kws)
-    }
-
-    # All LED refs present in the schematic
     all_led_refs: set[str] = {
         sym["reference"] for sym in schematic.get("symbols", [])
         if (sym.get("lib_id", "").split(":")[-1] if ":" in sym.get("lib_id", "") else sym.get("lib_id", ""))
         .upper().startswith("LED")
     }
 
-    # LEDs the rule-based checker cleared (not flagged) — trust rule-based over AI
-    rule_cleared_leds = all_led_refs - rule_flagged_led_resistors
-
     ai_faults = [
         f for f in ai_faults
         if not (
-            f.get("component", "") in rule_cleared_leds
+            f.get("component", "") in all_led_refs
             and any(kw in f.get("title", "").lower() for kw in _resistor_kws)
         )
     ]
