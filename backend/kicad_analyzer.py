@@ -1298,8 +1298,10 @@ def _suppress_noise_faults(faults: list[dict]) -> list[dict]:
     Handles three known cross-check overlaps:
 
     1. PWR_FLAG warning fires on the same net as a more specific fault
-       (voltage mismatch, missing decoupling cap, or single-pin net).
+       (voltage mismatch or missing decoupling cap).
        The specific fault is more actionable; the PWR_FLAG warning is noise.
+       NOTE: single-pin net warnings do NOT suppress PWR_FLAG because they are
+       independent issues — a power net can have one load and still need PWR_FLAG.
 
     2. Unconnected-pin warnings fire for every pin of a component that has
        a duplicate-reference fault.  Duplicate refs make the connectivity
@@ -1325,10 +1327,8 @@ def _suppress_noise_faults(faults: list[dict]) -> list[dict]:
             net = title.rsplit(" on ", 1)[-1].strip()
             specific_fault_nets.add(net)
 
-        # "Single-pin net 'NETNAME' — possible label typo"
-        elif "single-pin net" in title.lower() and "'" in title:
-            net = title.split("'")[1]
-            specific_fault_nets.add(net)
+        # NOTE: "Single-pin net" intentionally NOT added to specific_fault_nets here.
+        # A power net with one load is valid while still needing PWR_FLAG.
 
         # "Duplicate reference designator: REF (appears N times)"
         elif "duplicate reference" in title.lower():
