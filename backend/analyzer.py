@@ -58,6 +58,7 @@ async def call_openai(system_prompt: str, user_message: str) -> str:
     return response.choices[0].message.content
 
 
+
 def _try_repair_json(text: str):
     """Attempt to repair truncated JSON by closing open strings, arrays, and objects."""
     # Try as-is first
