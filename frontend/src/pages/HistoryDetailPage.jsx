@@ -78,7 +78,7 @@ export default function HistoryDetailPage() {
             ) : (
               <a href={meta.wokwi_url} target="_blank" rel="noopener noreferrer">{meta.wokwi_url}</a>
             )}
-            {' '} — {new Date(meta.created_at).toLocaleString()}
+            {' '} — {new Date(meta.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
           </p>
         </div>
       )}

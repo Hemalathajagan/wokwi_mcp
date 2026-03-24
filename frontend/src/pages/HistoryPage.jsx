@@ -87,7 +87,7 @@ export default function HistoryPage() {
                       )}
                     </div>
                     <span className="history-date">
-                      {new Date(item.created_at).toLocaleString()}
+                      {new Date(item.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}
                     </span>
                   </div>
                   <div className="history-card-actions">
