@@ -1544,14 +1544,17 @@ async def analyze_kicad_schematic(schematic: dict, raw_content: str = "", design
     for f in ai_faults:
         f.setdefault("_source", "ai")
 
-    # Strip ALL AI LED resistor faults — rule-based _check_led_resistors is the
-    # authoritative source for this check (wire-level connectivity precision).
-    # The AI has two known failure modes here:
-    #   1. False positives: flags LEDs that DO have resistors (connector-driven
-    #      circuits with no visible VCC net confuse the AI).
-    #   2. Wrong severity: AI emits "warning" but the correct level is "error".
-    # Suppressing AI LED resistor faults entirely avoids both problems.
-    _resistor_kws = ("current-limiting", "missing resistor", "current limiting", "no resistor")
+    # Strip ALL AI faults about LED components that mention a current-limiting
+    # resistor in ANY text field (title, explanation, or fix description).
+    # rule-based _check_led_resistors is the authoritative source for this check;
+    # the AI hallucinates these faults in various phrasings and categories
+    # (e.g. title="Potential issue with LED D3 power connection", category="power"
+    # but explanation mentions "current-limiting resistor").
+    _resistor_kws = (
+        "current-limiting", "current limiting", "limiting resistor",
+        "missing resistor", "no resistor", "add a resistor", "series resistor",
+        "resistor in series", "without a resistor", "needs a resistor",
+    )
 
     all_led_refs: set[str] = {
         sym["reference"] for sym in schematic.get("symbols", [])
@@ -1559,13 +1562,19 @@ async def analyze_kicad_schematic(schematic: dict, raw_content: str = "", design
         .upper().startswith("LED")
     }
 
-    ai_faults = [
-        f for f in ai_faults
-        if not (
-            f.get("component", "") in all_led_refs
-            and any(kw in f.get("title", "").lower() for kw in _resistor_kws)
-        )
-    ]
+    def _is_ai_led_resistor_fault(f: dict) -> bool:
+        if f.get("component", "") not in all_led_refs:
+            return False
+        # Scan all free-text fields — the AI sometimes hides the resistor
+        # complaint in the explanation or fix while using a vague title.
+        text = " ".join([
+            f.get("title", ""),
+            f.get("explanation", ""),
+            str(f.get("fix", {}).get("description", "")),
+        ]).lower()
+        return any(kw in text for kw in _resistor_kws)
+
+    ai_faults = [f for f in ai_faults if not _is_ai_led_resistor_fault(f)]
 
     all_faults = _deduplicate_faults(rule_faults + ai_faults)
 
