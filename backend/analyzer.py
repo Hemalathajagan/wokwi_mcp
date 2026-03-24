@@ -1476,11 +1476,31 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
                     board_type in _many_pin_boards):
                 continue
 
-            # 8. Servo pin attachment mismatch — AI cannot parse loop-based
-            #    attach() calls (e.g. myServo[i].attach(22 + i)) and falsely
-            #    claims the wiring order differs from the code.  The rule-based
-            #    checker already validated servo-pin wiring, so suppress this.
-            if "attachment mismatch" in title and "servo" in full_text:
+            # 8. Servo code/wiring mismatch — AI cannot parse loop-based
+            #    attach() calls and falsely claims the wiring order differs
+            #    from the code.  Rule checker already validated servo wiring.
+            _servo_mismatch_kws = (
+                "attachment mismatch", "mismatch between code and wiring for servo",
+                "servo.*mismatch", "mismatch.*servo",
+            )
+            if "servo" in full_text and any(kw in title for kw in (
+                    "attachment mismatch", "mismatch between code and wiring")):
+                continue
+
+            # 9. Exceeding maximum servo count on Mega — Mega supports up to 48
+            #    servos; AI confuses it with Uno limits.
+            _servo_count_kws = (
+                "exceeding maximum servo", "maximum servo count",
+                "servo count exceeded", "too many servos",
+            )
+            if (any(kw in full_text for kw in _servo_count_kws) and
+                    board_type in _many_pin_boards):
+                continue
+
+            # 10. Servo library misuse — AI hallucinates misuse when it cannot
+            #     follow loop-based attach()/write() patterns on Mega.
+            if ("misuse of servo" in full_text or "servo library misuse" in full_text or
+                    ("potential misuse" in title and "servo" in full_text)):
                 continue
 
         filtered.append(f)
