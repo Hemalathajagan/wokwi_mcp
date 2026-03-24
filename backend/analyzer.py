@@ -480,35 +480,9 @@ def _check_power_connections(parts: list[dict], adjacency: dict) -> list[dict]:
 
 
 def _check_servo_pwm(parts: list[dict], adjacency: dict) -> list[dict]:
-    """Check that servos are connected to PWM-capable pins."""
-    faults = []
-    parts_map = {p["id"]: p for p in parts}
-    board_type = get_board_from_parts(parts)
-    if not board_type:
-        return faults
-    pwm_pins = get_pwm_pins(board_type)
-
-    for part in parts:
-        if part.get("type") != "wokwi-servo":
-            continue
-        pid = part["id"]
-        pwm_key = f"{pid}:PWM"
-
-        for neighbor in adjacency.get(pwm_key, []):
-            if ":" not in neighbor:
-                continue
-            npart_id, npin = neighbor.split(":", 1)
-            if npart_id in parts_map and parts_map[npart_id].get("type") in SUPPORTED_BOARDS:
-                if npin not in pwm_pins:
-                    faults.append({
-                        "category": "signal",
-                        "severity": "error",
-                        "component": pid,
-                        "title": f"Servo '{pid}' on non-PWM pin {npin}",
-                        "explanation": f"Servo signal is connected to pin {npin}, which is not PWM-capable. Servos require a PWM signal for position control. PWM pins on {board_type}: {', '.join(sorted(pwm_pins))}.",
-                        "fix": {"type": "wiring", "description": f"Move the servo signal wire from pin {npin} to a PWM pin (e.g., 9 or 10)."},
-                    })
-    return faults
+    """The Arduino Servo library uses timer interrupts and works on any digital pin —
+    it does NOT require a hardware PWM pin. This check is intentionally disabled."""
+    return []
 
 
 def _extract_pin_usage_from_code(sketch_code: str) -> dict:
@@ -604,11 +578,26 @@ def _check_code_wiring_mismatch(sketch_code: str, diagram: dict) -> list[dict]:
                     "fix": {"type": "both", "description": f"Either add a wire to pin {pin_ref} in the circuit, or update the code to use a wired pin."},
                 })
 
+    # Find Arduino pins that connect to servo components — these are controlled via
+    # Servo.attach(), not digitalWrite/pinMode, so they won't appear in pin_usage.
+    servo_ids = {p["id"] for p in parts if p.get("type") == "wokwi-servo"}
+    servo_wired_pins = set()
+    for conn in connections:
+        if len(conn) < 2:
+            continue
+        for board_ep, other_ep in [(conn[0], conn[1]), (conn[1], conn[0])]:
+            if ":" not in board_ep or ":" not in other_ep:
+                continue
+            b_part, b_pin = board_ep.split(":", 1)
+            o_part, _ = other_ep.split(":", 1)
+            if b_part in board_ids and o_part in servo_ids:
+                servo_wired_pins.add(b_pin)
+
     # Check: wired signal pins not used in code
     signal_wired = {p for p in wired_pins if p.isdigit() or p.startswith("A")}
     code_pins = {defines.get(ref, ref) for ref in pin_usage.keys()}
     for pin in signal_wired:
-        if pin not in code_pins and pin not in ("GND.1", "GND.2", "GND.3", "5V", "3.3V", "VIN", "AREF", "RESET"):
+        if pin not in code_pins and pin not in ("GND.1", "GND.2", "GND.3", "5V", "3.3V", "VIN", "AREF", "RESET") and pin not in servo_wired_pins:
             faults.append({
                 "category": "cross_reference",
                 "severity": "info",
