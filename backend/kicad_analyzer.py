@@ -1461,20 +1461,24 @@ def _deduplicate_faults(faults: list[dict]) -> list[dict]:
             continue
 
         # Suppress AI ERC duplicates for the same component (e.g. GPT-4o rewording
-        # "unconnected pin" as "pin without no-connect marker")
-        if (component in unconnected_components and category == "erc" and
+        # "unconnected pin" as "pin without no-connect marker").
+        # Guard: only suppress AI-sourced faults — never the original rule-based ones.
+        if (f.get("_source") == "ai" and
+                component in unconnected_components and category == "erc" and
                 any(kw in title for kw in ("unconnected", "no-connect", "not connected", "floating"))):
             continue
 
         # Suppress AI signal-category faults for components already flagged as
         # unconnected (e.g. "Unconnected pin on LED D1" from signal category)
-        if (component in unconnected_components and category == "signal" and
+        if (f.get("_source") == "ai" and
+                component in unconnected_components and category == "signal" and
                 any(kw in title for kw in ("unconnected", "not connected", "floating", "open"))):
             continue
 
         # Suppress AI "missing resistor" faults for LEDs whose broken connection
         # is already reported — the resistor exists but is simply not wired yet
-        if (component in unconnected_components and category == "component" and
+        if (f.get("_source") == "ai" and
+                component in unconnected_components and category == "component" and
                 any(kw in title for kw in ("missing resistor", "missing current", "current-limiting", "no resistor"))):
             continue
 
@@ -1534,7 +1538,11 @@ async def analyze_kicad_schematic(schematic: dict, raw_content: str = "", design
     Returns a report dict with faults, summary, and source data.
     """
     rule_faults = analyze_schematic_rules(schematic)
+    for f in rule_faults:
+        f["_source"] = "rule"
     ai_faults = await _ai_analyze_schematic(schematic, rule_faults, design_description)
+    for f in ai_faults:
+        f.setdefault("_source", "ai")
 
     # Strip ALL AI LED resistor faults — rule-based _check_led_resistors is the
     # authoritative source for this check (wire-level connectivity precision).
@@ -1581,7 +1589,11 @@ async def analyze_kicad_pcb(
     Returns a report dict with faults, summary, and source data.
     """
     rule_faults = analyze_pcb_rules(pcb, schematic)
+    for f in rule_faults:
+        f["_source"] = "rule"
     ai_faults = await _ai_analyze_pcb(pcb, schematic, rule_faults, design_description)
+    for f in ai_faults:
+        f.setdefault("_source", "ai")
     all_faults = _deduplicate_faults(rule_faults + ai_faults)
 
     return {
