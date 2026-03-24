@@ -1528,8 +1528,7 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
                 #    attach() calls, so any "mismatch", "not referenced",
                 #    "unused pin" claim for a servo context is suppressed.
                 _servo_code_kws = (
-                    "attachment mismatch",
-                    "mismatch between code and wiring",
+                    "mismatch",           # catches all mismatch phrasings
                     "not properly referenced",
                     "pins not properly",
                     "unused pin reference",
