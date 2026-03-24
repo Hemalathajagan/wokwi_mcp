@@ -67,7 +67,8 @@ IMPORTANT — avoid these known false positive patterns:
 - Do NOT flag a correctly-wired LED (one whose anode net contains a resistor) as missing a current-limiting resistor.
 - Do NOT flag "missing decoupling capacitor on IC power pins" unless there are actual IC components (U-prefix reference designators such as U1, U2) in the component list. This rule does not apply to passive-only or LED-only circuits containing only R, C, D, LED, and connector components.
 - Do NOT flag "missing pull-up resistor on reset pin" unless a component with a dedicated reset pin (MCU, logic IC, etc.) is visible in the component list. Connector, resistor, LED, and capacitor components do not have reset pins.
-- Do NOT generate any fault whose component field is an unnamed net identifier (e.g. "unnamed_net_1", "_unnamed_net_3"). These are internal netlist labels, not meaningful signal names. Connectivity issues on such nets are already detected by the pre-analysis and must not be re-reported."""
+- Do NOT generate any fault whose component field is an unnamed net identifier (e.g. "unnamed_net_1", "_unnamed_net_3"). These are internal netlist labels, not meaningful signal names. Connectivity issues on such nets are already detected by the pre-analysis and must not be re-reported.
+- Do NOT generate generic "value verification needed", "must be verified", or "confirm the value" component faults for resistors, capacitors, or other passives that already have a valid, non-empty value. The automated checks already flag missing or placeholder values. Only flag a resistor value if it is demonstrably wrong for the circuit (e.g. 0 ohm shorting a supply, or clearly outside any reasonable range)."""
 
 
 KICAD_PCB_ANALYSIS_SYSTEM = """You are an expert PCB layout engineer. Analyze a KiCad PCB layout for manufacturing, signal integrity, and reliability issues following professional DRC (Design Rule Check) standards.

@@ -19,7 +19,7 @@ KICAD_COMPONENT_DB: dict[str, dict[str, Any]] = {
         "description": "Resistor",
         "pins": {"1": "passive", "2": "passive"},
         "checks": ["value_not_empty", "value_is_valid_resistance"],
-        "notes": "Verify resistance value matches design intent. Check power rating for current path.",
+        "notes": "Standard resistor. Only flag if value is missing, zero, or clearly wrong for the circuit (e.g. short-circuits a supply). Do not generate generic 'verify value' faults.",
     },
     "Device:R_Small": {
         "category": "passive",

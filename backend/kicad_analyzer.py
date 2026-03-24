@@ -1485,6 +1485,19 @@ def _deduplicate_faults(faults: list[dict]) -> list[dict]:
                 any(kw in title for kw in ("not connected", "not driven", "missing", "no power"))):
             continue
 
+        # Suppress generic AI "verification needed / confirm value" component faults.
+        # _check_missing_values already reports empty or placeholder values;
+        # vague "please verify" suggestions for components with valid values are
+        # not actionable and are known to fire inconsistently (e.g. only R3 out of
+        # six identical 10K resistors).
+        _verify_kws = (
+            "verification needed", "must be verified", "needs verification",
+            "verify resistance", "verify value", "verify the value",
+            "confirm that", "value verification",
+        )
+        if category == "component" and any(kw in title for kw in _verify_kws):
+            continue
+
         seen_titles.add(title)
         unique.append(f)
 
