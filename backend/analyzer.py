@@ -4,6 +4,7 @@ Detects wiring faults, component issues, power problems, signal integrity,
 code bugs, and code-circuit cross-reference mismatches.
 """
 
+import asyncio
 import json
 import os
 import re
@@ -1307,22 +1308,25 @@ async def full_analysis(diagram: dict, sketch_code: str, design_description: str
 
     diagram_json_str = json.dumps(diagram, indent=2)
 
-    # OpenAI deep analysis (circuit + code in parallel)
+    # OpenAI deep analysis — circuit and code calls run in parallel
     ai_faults = []
 
-    try:
-        # Circuit analysis
-        sys1, usr1 = build_circuit_analysis_prompt(diagram_json_str, component_ref, rule_findings_text, design_description)
-        circuit_response = await call_openai(sys1, usr1)
-        ai_faults.extend(parse_openai_json(circuit_response))
-    except Exception:
-        pass
+    sys1, usr1 = build_circuit_analysis_prompt(diagram_json_str, component_ref, rule_findings_text, design_description)
 
     if sketch_code:
+        sys2, usr2 = build_code_analysis_prompt(sketch_code, diagram_json_str, code_component_ref, rule_findings_text, design_description)
+        results = await asyncio.gather(
+            call_openai(sys1, usr1),
+            call_openai(sys2, usr2),
+            return_exceptions=True,
+        )
+        for res in results:
+            if not isinstance(res, Exception):
+                ai_faults.extend(parse_openai_json(res))
+    else:
         try:
-            sys2, usr2 = build_code_analysis_prompt(sketch_code, diagram_json_str, code_component_ref, rule_findings_text, design_description)
-            code_response = await call_openai(sys2, usr2)
-            ai_faults.extend(parse_openai_json(code_response))
+            circuit_response = await call_openai(sys1, usr1)
+            ai_faults.extend(parse_openai_json(circuit_response))
         except Exception:
             pass
 
