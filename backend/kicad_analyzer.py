@@ -1590,12 +1590,16 @@ def _deduplicate_faults(faults: list[dict]) -> list[dict]:
             continue
 
         # Suppress AI false-positive GND power errors — GND is always valid when
-        # GND power symbols are present; the AI sometimes hallucinates this
+        # GND power symbols are present; the AI sometimes hallucinates this.
+        # Check BOTH title and component for gnd/ground keywords because the AI
+        # sometimes uses a generic title like "Potential floating power pins"
+        # while putting "GND" in the component field.
+        _gnd_text = title + " " + component.lower()
         if (f.get("_source") == "ai" and category == "power" and
-                any(kw in title for kw in ("gnd", "ground")) and
+                any(kw in _gnd_text for kw in ("gnd", "ground")) and
                 any(kw in title for kw in (
                     "not connected", "not driven", "not properly", "improperly",
-                    "missing", "no power", "no source", "undriven",
+                    "missing", "no power", "no source", "undriven", "floating",
                 ))):
             continue
 
