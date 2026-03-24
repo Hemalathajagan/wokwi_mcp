@@ -1365,6 +1365,7 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
     all_comp_ids = {p["id"] for p in parts}
     led_ids = {p["id"] for p in parts
                if p.get("type", "") in ("wokwi-led", "wokwi-rgb-led")}
+    servo_ids_set = {p["id"] for p in parts if p.get("type") == "wokwi-servo"}
 
     # Components the rule checker flagged as fully unconnected (no wires at all)
     # These come from _check_unconnected_parts — title starts with "Unconnected component:"
@@ -1481,29 +1482,64 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
                     board_type in _many_pin_boards):
                 continue
 
-            # 8. Servo code/wiring mismatch — AI cannot parse loop-based
-            #    attach() calls and falsely claims the wiring order differs
-            #    from the code.  Rule checker already validated servo wiring.
-            if "servo" in full_text and any(kw in title for kw in (
-                    "attachment mismatch", "mismatch between code and wiring",
-                    "not properly referenced", "pins not properly")):
-                continue
+            # 8–10. Comprehensive servo suppression.
+            #
+            # The rule checker is authoritative for servo wiring.  When it
+            # finds no problems, AI faults about those servos are almost always
+            # hallucinations caused by:
+            #   • inability to parse loop-based attach(22 + i) calls
+            #   • mistaking daisy-chained V+ rails for a wiring loop
+            #   • assuming Uno servo/pin limits on a Mega
+            #
+            # Helper: does the component field refer to a servo?
+            def _is_servo_ref(comp, comp_low):
+                if comp in servo_ids_set:
+                    return True
+                if any(sid in comp for sid in servo_ids_set):
+                    return True
+                return "servo" in comp_low
 
-            # 9. Exceeding maximum servo count on Mega — Mega supports up to 48
-            #    servos; AI confuses it with Uno limits.
-            _servo_count_kws = (
-                "exceeding maximum servo", "maximum servo count",
-                "servo count exceeded", "too many servos",
-            )
-            if (any(kw in full_text for kw in _servo_count_kws) and
-                    board_type in _many_pin_boards):
-                continue
+            if servo_ids_set:
+                is_servo = _is_servo_ref(component, comp_lower)
 
-            # 10. Servo library misuse — AI hallucinates misuse when it cannot
-            #     follow loop-based attach()/write() patterns on Mega.
-            if ("misuse of servo" in full_text or "servo library misuse" in full_text or
-                    ("potential misuse" in title and "servo" in full_text)):
-                continue
+                # A. Wiring/signal/cross_reference fault on a confirmed-connected
+                #    servo → rule checker already cleared it.
+                if (is_servo and
+                        category in ("wiring", "signal", "cross_reference") and
+                        component in confirmed_connected_ids):
+                    continue
+
+                # B. V+ daisy-chaining misread as a loop or connection issue.
+                if is_servo and ("v+" in title or
+                        ("connection issue" in title and "v" in title)):
+                    continue
+
+                # C. Servo count limits — AI confuses Mega (48 servos) with Uno.
+                _servo_count_kws = (
+                    "exceeding maximum servo", "maximum servo count",
+                    "servo count exceeded", "too many servos",
+                    "excessive servo count", "servo limit",
+                )
+                if (any(kw in full_text for kw in _servo_count_kws) and
+                        board_type in _many_pin_boards):
+                    continue
+
+                # D. Code/wiring pattern faults — AI cannot follow loop-based
+                #    attach() calls, so any "mismatch", "not referenced",
+                #    "unused pin" claim for a servo context is suppressed.
+                _servo_code_kws = (
+                    "attachment mismatch",
+                    "mismatch between code and wiring",
+                    "not properly referenced",
+                    "pins not properly",
+                    "unused pin reference",
+                    "pin not wired",
+                    "misuse of servo",
+                    "servo library misuse",
+                    "potential misuse",
+                )
+                if "servo" in full_text and any(kw in title for kw in _servo_code_kws):
+                    continue
 
         filtered.append(f)
 
@@ -1515,6 +1551,12 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
         if title not in seen_titles:
             seen_titles.add(title)
             unique_faults.append(f)
+
+    # ── Normalize component field so frontend always receives a string ────────
+    for f in unique_faults:
+        comp = f.get("component", "")
+        if isinstance(comp, list):
+            f["component"] = ", ".join(str(c) for c in comp)
 
     errors = sum(1 for f in unique_faults if f.get("severity") == "error")
     warnings = sum(1 for f in unique_faults if f.get("severity") == "warning")
