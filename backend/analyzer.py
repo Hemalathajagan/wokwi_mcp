@@ -1476,6 +1476,13 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
                     board_type in _many_pin_boards):
                 continue
 
+            # 8. Servo pin attachment mismatch — AI cannot parse loop-based
+            #    attach() calls (e.g. myServo[i].attach(22 + i)) and falsely
+            #    claims the wiring order differs from the code.  The rule-based
+            #    checker already validated servo-pin wiring, so suppress this.
+            if "attachment mismatch" in title and "servo" in full_text:
+                continue
+
         filtered.append(f)
 
     # ── Deduplicate by normalized title (case-insensitive) ───────────────────
