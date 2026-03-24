@@ -1235,6 +1235,11 @@ async def analyze_wiring(diagram: dict) -> dict:
             "fix": {"type": "none", "description": "Check OPENAI_API_KEY and try again."},
         }]
 
+    for f in rule_faults:
+        f["_source"] = "rule"
+    for f in ai_faults:
+        f.setdefault("_source", "ai")
+
     all_faults = rule_faults + ai_faults
     return _build_report(diagram, "", all_faults)
 
@@ -1272,6 +1277,11 @@ async def analyze_code(sketch_code: str, diagram: dict) -> dict:
             "explanation": f"OpenAI analysis could not be performed: {str(e)}. Showing rule-based results only.",
             "fix": {"type": "none", "description": "Check OPENAI_API_KEY and try again."},
         }]
+
+    for f in rule_faults:
+        f["_source"] = "rule"
+    for f in ai_faults:
+        f.setdefault("_source", "ai")
 
     all_faults = rule_faults + ai_faults
     return _build_report(diagram or {}, sketch_code, all_faults)
@@ -1316,6 +1326,11 @@ async def full_analysis(diagram: dict, sketch_code: str, design_description: str
         except Exception:
             pass
 
+    for f in all_rule_faults:
+        f["_source"] = "rule"
+    for f in ai_faults:
+        f.setdefault("_source", "ai")
+
     all_faults = all_rule_faults + ai_faults
     return _build_report(diagram, sketch_code, all_faults)
 
@@ -1350,11 +1365,75 @@ async def suggest_fixes(fault_report: str, diagram: dict, sketch_code: str) -> d
 
 
 def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
-    """Build the standardized analysis report."""
-    # Deduplicate faults by normalized title (case-insensitive)
-    seen_titles = set()
-    unique_faults = []
+    """Build the standardized analysis report with semantic false-positive suppression."""
+    parts = diagram.get("parts", [])
+
+    # ── Build context sets from rule faults ─────────────────────────────────
+    all_comp_ids = {p["id"] for p in parts}
+    led_ids = {p["id"] for p in parts
+               if p.get("type", "") in ("wokwi-led", "wokwi-rgb-led")}
+
+    # Components that the rule checker has flagged as unconnected
+    _unconn_kws = ("unconnected", "not connected", "floating")
+    rule_unconnected_ids: set[str] = set()
     for f in faults:
+        if (f.get("_source") == "rule" and
+                any(kw in f.get("title", "").lower() for kw in _unconn_kws)):
+            rule_unconnected_ids.add(f.get("component", ""))
+    # Everything else is confirmed-connected (rule checker is authoritative)
+    confirmed_connected_ids = all_comp_ids - rule_unconnected_ids
+
+    _resistor_kws = (
+        "current-limiting", "current limiting", "limiting resistor",
+        "missing resistor", "no resistor", "add a resistor", "series resistor",
+        "resistor in series", "without a resistor", "needs a resistor",
+    )
+    _erc_conn_kws = ("unconnected", "not connected", "floating", "no-connect",
+                     "open pin", "pin without", "without no-connect")
+    _verify_kws = ("verify", "verification needed", "must be verified",
+                   "confirm the value", "check the value")
+
+    # ── Apply suppression filters to AI faults ───────────────────────────────
+    filtered: list[dict] = []
+    for f in faults:
+        if f.get("_source") == "ai":
+            title = f.get("title", "").lower()
+            explanation = f.get("explanation", "").lower()
+            fix_desc = str(f.get("fix", {}).get("description", "")).lower()
+            full_text = title + " " + explanation + " " + fix_desc
+            component = f.get("component", "")
+            comp_lower = component.lower()
+            category = f.get("category", "")
+
+            # 1. LED resistor — rule checker (_check_led_resistor) is authoritative
+            if component in led_ids and any(kw in full_text for kw in _resistor_kws):
+                continue
+
+            # 2. GND false-positive (AI hallucinating GND not properly driven)
+            _gnd_text = title + " " + comp_lower
+            if (category in ("power", "wiring") and
+                    any(kw in _gnd_text for kw in ("gnd", "ground")) and
+                    any(kw in title for kw in (
+                        "not connected", "not driven", "not properly", "improperly",
+                        "missing", "no power", "no source", "undriven", "floating",
+                    ))):
+                continue
+
+            # 3. Confirmed-connected filter — rule checker is authoritative for connectivity
+            if (component in confirmed_connected_ids and
+                    any(kw in (title + " " + explanation) for kw in _erc_conn_kws)):
+                continue
+
+            # 4. Verify-value suppression — rule checker already catches missing values
+            if any(kw in (title + " " + explanation) for kw in _verify_kws):
+                continue
+
+        filtered.append(f)
+
+    # ── Deduplicate by normalized title (case-insensitive) ───────────────────
+    seen_titles: set[str] = set()
+    unique_faults: list[dict] = []
+    for f in filtered:
         title = f.get("title", "").strip().lower()
         if title not in seen_titles:
             seen_titles.add(title)

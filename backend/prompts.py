@@ -60,7 +60,14 @@ For each fault found, return a JSON object with these fields:
 - "fix": {"type": "wiring", "description": "how to fix it"}
 
 Return ONLY a JSON array of fault objects. If no faults found, return an empty array [].
-Do NOT duplicate findings already in the pre-analysis. Instead, confirm or refute them and add NEW findings."""
+Do NOT duplicate findings already in the pre-analysis. Instead, confirm or refute them and add NEW findings.
+
+IMPORTANT — avoid these known false positive patterns:
+- Do NOT flag GND net connectivity as an error. GND is the reference potential and is always valid when GND power symbols/wires are present.
+- Do NOT flag "missing current-limiting resistor" for an LED that is already flagged as unconnected in the pre-analysis. The broken wire is the root cause — do not add a separate resistor fault.
+- Do NOT flag "missing current-limiting resistor" for an LED that is correctly wired through a resistor. If a wokwi-resistor component sits between the Arduino pin and the LED anode, the resistor is present.
+- Do NOT re-report unconnected/floating pin issues already listed in the pre-analysis under any alternative wording.
+- Do NOT generate generic "value must be verified" or "confirm the resistance value" faults for components that already have a valid, non-empty value. Only flag a value if it is demonstrably wrong for the circuit."""
 
 CIRCUIT_ANALYSIS_USER = """## Design Description (User's Intended Behavior)
 {design_description}
