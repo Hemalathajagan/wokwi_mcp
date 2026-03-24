@@ -1435,10 +1435,14 @@ def _deduplicate_faults(faults: list[dict]) -> list[dict]:
     """
     seen_titles: set[str] = set()
 
-    # Pass 1 — find components already covered by rule-based unconnected-pin errors
+    # Pass 1 — find components already covered by RULE-BASED unconnected-pin errors.
+    # Only rule-sourced faults are collected here; collecting AI faults too would
+    # cause the AI's own unconnected-pin reports to self-suppress in pass 2.
     unconnected_components: set[str] = set()
     for f in faults:
-        if "unconnected" in f.get("title", "").lower() and f.get("category") == "erc":
+        if (f.get("_source") == "rule" and
+                "unconnected" in f.get("title", "").lower() and
+                f.get("category") == "erc"):
             unconnected_components.add(f.get("component", ""))
 
     # Pass 2 — filter
@@ -1484,9 +1488,12 @@ def _deduplicate_faults(faults: list[dict]) -> list[dict]:
 
         # Suppress AI false-positive GND power errors — GND is always valid when
         # GND power symbols are present; the AI sometimes hallucinates this
-        if (category == "power" and
+        if (f.get("_source") == "ai" and category == "power" and
                 any(kw in title for kw in ("gnd", "ground")) and
-                any(kw in title for kw in ("not connected", "not driven", "missing", "no power"))):
+                any(kw in title for kw in (
+                    "not connected", "not driven", "not properly", "improperly",
+                    "missing", "no power", "no source", "undriven",
+                ))):
             continue
 
         # Suppress generic AI "verification needed / confirm value" component faults.
@@ -1575,6 +1582,54 @@ async def analyze_kicad_schematic(schematic: dict, raw_content: str = "", design
         return any(kw in text for kw in _resistor_kws)
 
     ai_faults = [f for f in ai_faults if not _is_ai_led_resistor_fault(f)]
+
+    # If the design has no IC components (U-prefix), suppress AI faults about
+    # decoupling capacitors and reset-pin pull-ups — these rules only apply to
+    # IC-based circuits and are false positives on passive/LED-only designs.
+    all_ic_refs: set[str] = {
+        sym["reference"] for sym in schematic.get("symbols", [])
+        if sym.get("reference", "").upper().startswith("U")
+    }
+    if not all_ic_refs:
+        _no_ic_kws = (
+            "decoupling capacitor", "bypass capacitor", "decoupling cap",
+            "pull-up resistor on reset", "pull-up on reset", "reset pin pull",
+            "reset pull-up", "missing pull-up",
+        )
+        ai_faults = [
+            f for f in ai_faults
+            if not any(
+                kw in (f.get("title", "") + " " + f.get("explanation", "")).lower()
+                for kw in _no_ic_kws
+            )
+        ]
+
+    # The rule-based connectivity check is authoritative: _check_unconnected_pins
+    # inspects every pin. If it produced no unconnected-pin fault for a component,
+    # all its pins are connected. Any AI ERC "floating/unconnected" claim for such
+    # a component is a false positive — suppress it.
+    rule_unconnected_refs: set[str] = {
+        f["component"] for f in rule_faults
+        if f.get("_source") == "rule" and f.get("category") == "erc" and
+        any(kw in f.get("title", "").lower()
+            for kw in ("unconnected", "not connected", "floating"))
+    }
+    all_component_refs: set[str] = {sym["reference"] for sym in schematic.get("symbols", [])}
+    confirmed_connected_refs = all_component_refs - rule_unconnected_refs
+
+    _erc_conn_kws = (
+        "unconnected", "not connected", "floating", "no-connect",
+        "open pin", "pin without", "without no-connect",
+    )
+    ai_faults = [
+        f for f in ai_faults
+        if not (
+            f.get("category") == "erc" and
+            f.get("component", "") in confirmed_connected_refs and
+            any(kw in (f.get("title", "") + " " + f.get("explanation", "")).lower()
+                for kw in _erc_conn_kws)
+        )
+    ]
 
     all_faults = _deduplicate_faults(rule_faults + ai_faults)
 
