@@ -1438,6 +1438,11 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
             if component in led_ids and any(kw in full_text for kw in _resistor_kws):
                 continue
 
+            # 1b. Servo resistor — servos have internal electronics; they never
+            #     need current-limiting resistors.  AI confuses them with LEDs.
+            if "servo" in comp_lower and any(kw in full_text for kw in _resistor_kws):
+                continue
+
             # 2. GND false-positive (AI hallucinating GND not properly driven)
             _gnd_text = title + " " + comp_lower
             if (category in ("power", "wiring") and
@@ -1479,12 +1484,9 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
             # 8. Servo code/wiring mismatch — AI cannot parse loop-based
             #    attach() calls and falsely claims the wiring order differs
             #    from the code.  Rule checker already validated servo wiring.
-            _servo_mismatch_kws = (
-                "attachment mismatch", "mismatch between code and wiring for servo",
-                "servo.*mismatch", "mismatch.*servo",
-            )
             if "servo" in full_text and any(kw in title for kw in (
-                    "attachment mismatch", "mismatch between code and wiring")):
+                    "attachment mismatch", "mismatch between code and wiring",
+                    "not properly referenced", "pins not properly")):
                 continue
 
             # 9. Exceeding maximum servo count on Mega — Mega supports up to 48

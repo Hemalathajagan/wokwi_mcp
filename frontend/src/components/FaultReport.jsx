@@ -86,7 +86,24 @@ export default function FaultReport({ faults }) {
                   {CATEGORY_LABELS[fault.category] || fault.category}
                 </span>
                 <span className="fault-title">{fault.title}</span>
-                <span className="component-tag">{fault.component}</span>
+                <span className="component-tag">
+                  {(() => {
+                    const raw = fault.component;
+                    if (!raw) return null;
+                    // Handle array (AI sometimes returns component as a list)
+                    if (Array.isArray(raw)) {
+                      const shown = raw.slice(0, 3).join(', ');
+                      return raw.length > 3 ? `${shown} +${raw.length - 3} more` : shown;
+                    }
+                    // Handle long comma-separated string
+                    const parts = String(raw).split(',').map(s => s.trim()).filter(Boolean);
+                    if (parts.length > 3) {
+                      return `${parts.slice(0, 3).join(', ')} +${parts.length - 3} more`;
+                    }
+                    // Truncate plain long strings
+                    return String(raw).length > 50 ? String(raw).slice(0, 50) + '…' : raw;
+                  })()}
+                </span>
                 <span className="expand-icon">{isExpanded ? '\u25B2' : '\u25BC'}</span>
               </div>
 
