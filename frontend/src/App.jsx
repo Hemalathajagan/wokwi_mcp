@@ -22,31 +22,41 @@ function Dashboard() {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [status, setStatus] = useState(null); // transient info messages (warm-up)
   const [activeSection, setActiveSection] = useState('faults');
+
+  const runWithWarmup = async (apiFn, projectType) => {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY_MS = 20000;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const result = await apiFn();
+        setStatus(null);
+        return result;
+      } catch (err) {
+        if (err.response) throw err; // real API error — don't retry
+        if (attempt < MAX_RETRIES) {
+          setStatus(`Server is starting up on Render… retrying (${attempt}/${MAX_RETRIES - 1}). Please wait.`);
+          await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+        } else {
+          setStatus(null);
+          throw new Error('Server is unavailable. Please try again in a moment.');
+        }
+      }
+    }
+  };
 
   const handleAnalyze = async ({ url, description }) => {
     setLoading(true);
     setError(null);
+    setStatus(null);
     setReport(null);
     setActiveSection('faults');
     try {
-      const result = await analyzeProject(url, description);
+      const result = await runWithWarmup(() => analyzeProject(url, description), 'wokwi');
       setReport({ ...result, _projectType: 'wokwi' });
     } catch (err) {
-      if (!err.response) {
-        // No response = server cold-start on Render (503 without CORS headers)
-        setError('Server is warming up — this takes ~30 s on the free plan. Retrying automatically…');
-        await new Promise(r => setTimeout(r, 30000));
-        try {
-          setError(null);
-          const result = await analyzeProject(url, description);
-          setReport({ ...result, _projectType: 'wokwi' });
-        } catch (retryErr) {
-          setError(retryErr.response?.data?.detail || 'Server unavailable. Please try again in a moment.');
-        }
-      } else {
-        setError(err.response?.data?.detail || err.message);
-      }
+      setError(err.response?.data?.detail || err.message);
     } finally {
       setLoading(false);
     }
@@ -55,25 +65,14 @@ function Dashboard() {
   const handleKiCadAnalyze = async ({ files, description }) => {
     setLoading(true);
     setError(null);
+    setStatus(null);
     setReport(null);
     setActiveSection('faults');
     try {
-      const result = await uploadKiCadFiles(files, description);
+      const result = await runWithWarmup(() => uploadKiCadFiles(files, description), 'kicad');
       setReport({ ...result, _projectType: 'kicad' });
     } catch (err) {
-      if (!err.response) {
-        setError('Server is warming up — this takes ~30 s on the free plan. Retrying automatically…');
-        await new Promise(r => setTimeout(r, 30000));
-        try {
-          setError(null);
-          const result = await uploadKiCadFiles(files, description);
-          setReport({ ...result, _projectType: 'kicad' });
-        } catch (retryErr) {
-          setError(retryErr.response?.data?.detail || 'Server unavailable. Please try again in a moment.');
-        }
-      } else {
-        setError(err.response?.data?.detail || err.message);
-      }
+      setError(err.response?.data?.detail || err.message);
     } finally {
       setLoading(false);
     }
@@ -84,6 +83,7 @@ function Dashboard() {
       setMode(newMode);
       setReport(null);
       setError(null);
+      setStatus(null);
       setActiveSection('faults');
     }
   };
@@ -125,6 +125,13 @@ function Dashboard() {
         <UrlInput onAnalyze={handleAnalyze} loading={loading} />
       ) : (
         <KiCadUpload onAnalyze={handleKiCadAnalyze} loading={loading} />
+      )}
+
+      {status && (
+        <div className="status-banner">
+          <span className="spinner" />
+          {status}
+        </div>
       )}
 
       {error && (

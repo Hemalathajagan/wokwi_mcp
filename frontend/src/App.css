@@ -761,6 +761,19 @@ header .subtitle {
   to { transform: rotate(360deg); }
 }
 
+/* Status / info banner (server warming up, etc.) */
+.status-banner {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
 /* Error banner */
 .error-banner {
   background: #fef2f2;
