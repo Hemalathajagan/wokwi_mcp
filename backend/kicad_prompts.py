@@ -64,7 +64,10 @@ IMPORTANT — avoid these known false positive patterns:
 - Do NOT flag "missing current-limiting resistor" for an LED that already has an unconnected pin in the pre-analysis. The broken wire is the root cause; the resistor exists but is simply not wired yet.
 - Do NOT re-report unconnected pin issues already listed in the pre-analysis under any alternative wording (e.g. "floating pin", "pin without no-connect marker", "open pin"). If it is already in pre-analysis, skip it entirely.
 - Do NOT flag GND net connectivity as an error. GND is the reference potential; it is always correctly defined when GND power symbols are present in the schematic.
-- Do NOT flag a correctly-wired LED (one whose anode net contains a resistor) as missing a current-limiting resistor."""
+- Do NOT flag a correctly-wired LED (one whose anode net contains a resistor) as missing a current-limiting resistor.
+- Do NOT flag "missing decoupling capacitor on IC power pins" unless there are actual IC components (U-prefix reference designators such as U1, U2) in the component list. This rule does not apply to passive-only or LED-only circuits containing only R, C, D, LED, and connector components.
+- Do NOT flag "missing pull-up resistor on reset pin" unless a component with a dedicated reset pin (MCU, logic IC, etc.) is visible in the component list. Connector, resistor, LED, and capacitor components do not have reset pins.
+- Do NOT generate any fault whose component field is an unnamed net identifier (e.g. "unnamed_net_1", "_unnamed_net_3"). These are internal netlist labels, not meaningful signal names. Connectivity issues on such nets are already detected by the pre-analysis and must not be re-reported."""
 
 
 KICAD_PCB_ANALYSIS_SYSTEM = """You are an expert PCB layout engineer. Analyze a KiCad PCB layout for manufacturing, signal integrity, and reliability issues following professional DRC (Design Rule Check) standards.
@@ -289,10 +292,15 @@ def _format_nets(nets: dict) -> str:
         return "No nets found."
     lines = []
     for name, pins in sorted(nets.items()):
+        # Skip internal unnamed nets — they are anonymous connectivity nodes
+        # whose issues are already handled by the rule-based unconnected-pin check.
+        # Showing them to the AI causes hallucinated IC-power / reset-pin faults.
+        if name.startswith("_unnamed_"):
+            continue
         pins_str = ", ".join(pins[:10])
         extra = f" ... and {len(pins) - 10} more" if len(pins) > 10 else ""
         lines.append(f"- **{name}**: {pins_str}{extra}")
-    return "\n".join(lines)
+    return "\n".join(lines) if lines else "No named nets found."
 
 
 def _format_pcb_nets(nets: dict) -> str:

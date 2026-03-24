@@ -1442,11 +1442,19 @@ def _deduplicate_faults(faults: list[dict]) -> list[dict]:
             unconnected_components.add(f.get("component", ""))
 
     # Pass 2 — filter
+    _unnamed_net_re = re.compile(r'^_?unnamed[_\-]net[_\-]\d+$', re.IGNORECASE)
     unique: list[dict] = []
     for f in faults:
         title = f.get("title", "").strip().lower()
         component = f.get("component", "")
         category = f.get("category", "")
+
+        # Suppress any AI fault whose component is an internal unnamed net
+        # (e.g. "unnamed_net_1", "_unnamed_net_3").  These are anonymous
+        # connectivity labels — the AI should never generate faults about them
+        # since the rule-based unconnected-pin check is the authoritative source.
+        if _unnamed_net_re.match(component.strip()):
+            continue
 
         # Skip exact-title duplicates
         if title in seen_titles:
