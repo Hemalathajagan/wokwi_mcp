@@ -8,6 +8,7 @@ Usage:
 """
 
 import argparse
+import asyncio
 import json
 import sys
 import os
@@ -112,10 +113,34 @@ app.include_router(auth_router)
 app.include_router(history_router)
 
 
+async def _keep_alive_loop():
+    """Ping the health endpoint every 14 min to prevent Render free tier from spinning down.
+
+    Render spins down a free service after ~15 min of inactivity, which causes the next
+    request to hit a cold 503 that lacks CORS headers — the browser reports this as a
+    CORS policy error. Pinging via the public RENDER_EXTERNAL_URL counts as real external
+    traffic to Render, preventing the sleep.
+    """
+    import httpx
+    base = os.environ.get("RENDER_EXTERNAL_URL", "").rstrip("/")
+    if not base:
+        return  # not running on Render — skip
+    health_url = f"{base}/api/health"
+    await asyncio.sleep(60)  # let the server finish starting up first
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.get(health_url)
+        except Exception:
+            pass
+        await asyncio.sleep(14 * 60)  # every 14 minutes
+
+
 @app.on_event("startup")
 async def startup():
     await init_db()
     await migrate_db()
+    asyncio.create_task(_keep_alive_loop())
 
 
 @app.get("/api/health")

@@ -33,7 +33,20 @@ function Dashboard() {
       const result = await analyzeProject(url, description);
       setReport({ ...result, _projectType: 'wokwi' });
     } catch (err) {
-      setError(err.response?.data?.detail || err.message);
+      if (!err.response) {
+        // No response = server cold-start on Render (503 without CORS headers)
+        setError('Server is warming up — this takes ~30 s on the free plan. Retrying automatically…');
+        await new Promise(r => setTimeout(r, 30000));
+        try {
+          setError(null);
+          const result = await analyzeProject(url, description);
+          setReport({ ...result, _projectType: 'wokwi' });
+        } catch (retryErr) {
+          setError(retryErr.response?.data?.detail || 'Server unavailable. Please try again in a moment.');
+        }
+      } else {
+        setError(err.response?.data?.detail || err.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -48,7 +61,19 @@ function Dashboard() {
       const result = await uploadKiCadFiles(files, description);
       setReport({ ...result, _projectType: 'kicad' });
     } catch (err) {
-      setError(err.response?.data?.detail || err.message);
+      if (!err.response) {
+        setError('Server is warming up — this takes ~30 s on the free plan. Retrying automatically…');
+        await new Promise(r => setTimeout(r, 30000));
+        try {
+          setError(null);
+          const result = await uploadKiCadFiles(files, description);
+          setReport({ ...result, _projectType: 'kicad' });
+        } catch (retryErr) {
+          setError(retryErr.response?.data?.detail || 'Server unavailable. Please try again in a moment.');
+        }
+      } else {
+        setError(err.response?.data?.detail || err.message);
+      }
     } finally {
       setLoading(false);
     }
