@@ -1393,6 +1393,19 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
                      "open pin", "pin without", "without no-connect")
     _verify_kws = ("verify", "verification needed", "must be verified",
                    "confirm the value", "check the value")
+    _serial_begin_kws = (
+        "missing serial.begin", "serial.begin() missing", "no serial.begin",
+        "serial not initialized", "serial not begun", "serial.begin not called",
+        "missing serial initialization",
+    )
+    _exceed_pin_kws = (
+        "exceeds available pins", "exceeds pins", "more pins than available",
+        "not enough pins", "insufficient pins", "pin count exceeded",
+        "num_servos exceeds",
+    )
+    # Boards where the AI routinely underestimates available digital pins
+    board_type = get_board_from_parts(parts)
+    _many_pin_boards = {"wokwi-arduino-mega"}
 
     # ── Collapse cascade faults for fully-unconnected components ────────────
     # When a component has zero wires, _check_unconnected_parts fires once AND
@@ -1442,6 +1455,25 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
 
             # 4. Verify-value suppression — rule checker already catches missing values
             if any(kw in (title + " " + explanation) for kw in _verify_kws):
+                continue
+
+            # 5. GND connection issue on a non-GND component — AI picks one
+            #    component arbitrarily when all are wired the same (e.g. servo9
+            #    out of 32 identical servos).  If "gnd" appears in the title but
+            #    the component is not a GND rail, suppress.
+            if ("gnd" in title or "ground" in title) and "connection issue" in title:
+                continue
+
+            # 6. Missing Serial.begin() when Serial.begin() exists anywhere in code
+            #    (it may be inside a helper function, not setup() — that's fine).
+            if (any(kw in full_text for kw in _serial_begin_kws) and
+                    "serial.begin" in sketch_code.lower()):
+                continue
+
+            # 7. "Exceeds available pins" on boards with many digital pins (Mega).
+            #    The AI assumes Uno limits; Mega has 54 digital pins so 32 servos fit.
+            if (any(kw in full_text for kw in _exceed_pin_kws) and
+                    board_type in _many_pin_boards):
                 continue
 
         filtered.append(f)
