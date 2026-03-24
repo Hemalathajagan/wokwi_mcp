@@ -1373,9 +1373,17 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
     led_ids = {p["id"] for p in parts
                if p.get("type", "") in ("wokwi-led", "wokwi-rgb-led")}
 
-    # Components that the rule checker has flagged as unconnected
+    # Components the rule checker flagged as fully unconnected (no wires at all)
+    # These come from _check_unconnected_parts — title starts with "Unconnected component:"
+    fully_unconnected_ids: set[str] = set()
+    for f in faults:
+        if (f.get("_source") == "rule" and
+                f.get("title", "").lower().startswith("unconnected component:")):
+            fully_unconnected_ids.add(f.get("component", ""))
+
+    # Components that the rule checker has flagged as unconnected (any phrasing)
     _unconn_kws = ("unconnected", "not connected", "floating")
-    rule_unconnected_ids: set[str] = set()
+    rule_unconnected_ids: set[str] = set(fully_unconnected_ids)
     for f in faults:
         if (f.get("_source") == "rule" and
                 any(kw in f.get("title", "").lower() for kw in _unconn_kws)):
@@ -1393,9 +1401,22 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
     _verify_kws = ("verify", "verification needed", "must be verified",
                    "confirm the value", "check the value")
 
+    # ── Collapse cascade faults for fully-unconnected components ────────────
+    # When a component has zero wires, _check_unconnected_parts fires once AND
+    # _check_power_connections fires twice (missing VCC + missing GND).
+    # The power/ground faults are consequences of the root cause — suppress them
+    # so the user sees one clear "Unconnected component" fault, not three.
+    _power_gnd_titles = ("missing power", "missing ground", "missing vcc", "missing gnd")
+
     # ── Apply suppression filters to AI faults ───────────────────────────────
     filtered: list[dict] = []
     for f in faults:
+        # Suppress cascading power/ground faults for fully-unconnected components
+        if (f.get("_source") == "rule" and
+                f.get("component", "") in fully_unconnected_ids and
+                any(kw in f.get("title", "").lower() for kw in _power_gnd_titles)):
+            continue
+
         if f.get("_source") == "ai":
             title = f.get("title", "").lower()
             explanation = f.get("explanation", "").lower()
