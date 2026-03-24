@@ -54,6 +54,7 @@ SIGNAL_PATTERNS: dict[str, dict[str, list[str]]] = {
 }
 
 _UART_TX_PIN_NAMES = {"TX", "TXD", "UART_TX", "UART_TXD", "TX0", "TX1", "TXD0", "TXD1"}
+
 _UART_RX_PIN_NAMES = {"RX", "RXD", "UART_RX", "UART_RXD", "RX0", "RX1", "RXD0", "RXD1"}
 
 
@@ -1356,6 +1357,105 @@ def _suppress_noise_faults(faults: list[dict]) -> list[dict]:
     return result
 
 
+def _consolidate_broken_led_circuits(faults: list[dict], schematic: dict) -> list[dict]:
+    """Consolidate multi-fault cascades caused by a single missing wire.
+
+    When an LED's anode and a nearby resistor's output pin are both unconnected
+    (same Y row, resistor to the left of the LED within 15 mm), the three
+    individual faults — resistor unconnected, LED anode unconnected, LED missing
+    resistor — are all consequences of one missing wire.  Replace them with a
+    single root-cause fault so beginners see one clear problem to fix.
+    """
+    from collections import defaultdict
+
+    # Build pin-position map: ref -> {pin_number: (x, y)}
+    pin_pos: dict[str, dict[str, tuple]] = {}
+    for sym in schematic.get("symbols", []):
+        ref = sym.get("reference", "")
+        pin_pos[ref] = {p["number"]: p["position"] for p in sym.get("pins", [])}
+
+    # Index faults by component
+    by_comp: dict[str, list[dict]] = defaultdict(list)
+    for f in faults:
+        by_comp[f.get("component", "")].append(f)
+
+    # LEDs with both unconnected-anode AND missing-resistor faults
+    led_broken: list[str] = [
+        ref for ref, cf in by_comp.items()
+        if any("unconnected" in f.get("title", "").lower() for f in cf)
+        and any("resistor" in f.get("title", "").lower() for f in cf)
+    ]
+
+    if not led_broken:
+        return faults
+
+    # Resistors with an unconnected-pin fault
+    res_broken: list[str] = [
+        ref for ref, cf in by_comp.items()
+        if ref.upper().startswith("R") and
+        any("unconnected" in f.get("title", "").lower() for f in cf)
+    ]
+
+    to_remove: set[int] = set()
+    to_add: list[dict] = []
+
+    for led_ref in led_broken:
+        # LED anode is pin "2" in Device:LED
+        anode_pos = pin_pos.get(led_ref, {}).get("2")
+        if not anode_pos:
+            continue
+        ax, ay = float(anode_pos[0]), float(anode_pos[1])
+
+        for res_ref in res_broken:
+            matched_pin = None
+            for pin_num, pos in pin_pos.get(res_ref, {}).items():
+                px, py = float(pos[0]), float(pos[1])
+                # Same row (Y within 0.5 mm), resistor pin is just to the left of
+                # the LED anode (0 < gap < 15 mm) — classic adjacent-component layout
+                if abs(py - ay) < 0.5 and 0 < (ax - px) < 15:
+                    matched_pin = pin_num
+                    break
+
+            if matched_pin is None:
+                continue
+
+            # Remove the three cascade faults
+            for f in by_comp[led_ref]:
+                to_remove.add(id(f))
+            for f in by_comp[res_ref]:
+                to_remove.add(id(f))
+
+            # One root-cause fault in their place
+            to_add.append({
+                "category": "erc",
+                "severity": "error",
+                "component": f"{res_ref}, {led_ref}",
+                "title": f"Missing wire: {res_ref} output not connected to {led_ref} anode",
+                "explanation": (
+                    f"A single wire is missing between {res_ref} (pin {matched_pin}) and "
+                    f"{led_ref} (anode, pin 2). This one gap causes three symptoms: "
+                    f"{res_ref} pin {matched_pin} is floating, {led_ref} has no drive path, "
+                    f"and the LED circuit is open. Adding the wire fixes all three at once."
+                ),
+                "fix": {
+                    "type": "schematic",
+                    "description": (
+                        f"Draw a wire from {res_ref} pin {matched_pin} to {led_ref} anode "
+                        f"(pin 2). This single connection resolves all reported errors for "
+                        f"this LED circuit."
+                    ),
+                },
+            })
+            break  # each LED matches at most one resistor
+
+    if not to_add:
+        return faults
+
+    result = [f for f in faults if id(f) not in to_remove]
+    result.extend(to_add)
+    return result
+
+
 def analyze_schematic_rules(schematic: dict) -> list[dict]:
     """Run all schematic ERC rule-based checks."""
     faults = []
@@ -1373,7 +1473,8 @@ def analyze_schematic_rules(schematic: dict) -> list[dict]:
     faults.extend(_check_pin_type_conflicts(schematic))
     faults.extend(_check_footprint_pad_mismatch(schematic))
     faults.extend(_check_lib_symbol_issues(schematic))
-    return _suppress_noise_faults(faults)
+    faults = _suppress_noise_faults(faults)
+    return _consolidate_broken_led_circuits(faults, schematic)
 
 
 def analyze_pcb_rules(pcb: dict, schematic: dict | None = None) -> list[dict]:
@@ -1439,11 +1540,13 @@ def _deduplicate_faults(faults: list[dict]) -> list[dict]:
     # Only rule-sourced faults are collected here; collecting AI faults too would
     # cause the AI's own unconnected-pin reports to self-suppress in pass 2.
     unconnected_components: set[str] = set()
+    _unconn_title_kws = ("unconnected", "not connected", "missing wire")
     for f in faults:
-        if (f.get("_source") == "rule" and
-                "unconnected" in f.get("title", "").lower() and
-                f.get("category") == "erc"):
-            unconnected_components.add(f.get("component", ""))
+        if (f.get("_source") == "rule" and f.get("category") == "erc" and
+                any(kw in f.get("title", "").lower() for kw in _unconn_title_kws)):
+            # Component may be a compound string like "R1, D1" from consolidation
+            for part in f.get("component", "").split(","):
+                unconnected_components.add(part.strip())
 
     # Pass 2 — filter
     _unnamed_net_re = re.compile(r'^_?unnamed[_\-]net[_\-]\d+$', re.IGNORECASE)
@@ -1608,12 +1711,15 @@ async def analyze_kicad_schematic(schematic: dict, raw_content: str = "", design
     # inspects every pin. If it produced no unconnected-pin fault for a component,
     # all its pins are connected. Any AI ERC "floating/unconnected" claim for such
     # a component is a false positive — suppress it.
-    rule_unconnected_refs: set[str] = {
-        f["component"] for f in rule_faults
-        if f.get("_source") == "rule" and f.get("category") == "erc" and
-        any(kw in f.get("title", "").lower()
-            for kw in ("unconnected", "not connected", "floating"))
-    }
+    # Collect all component refs flagged by rule-based connectivity faults.
+    # Component may be a compound string like "R1, D1" from _consolidate_broken_led_circuits.
+    rule_unconnected_refs: set[str] = set()
+    for f in rule_faults:
+        if (f.get("_source") == "rule" and f.get("category") == "erc" and
+                any(kw in f.get("title", "").lower()
+                    for kw in ("unconnected", "not connected", "floating", "missing wire"))):
+            for part in f.get("component", "").split(","):
+                rule_unconnected_refs.add(part.strip())
     all_component_refs: set[str] = {sym["reference"] for sym in schematic.get("symbols", [])}
     confirmed_connected_refs = all_component_refs - rule_unconnected_refs
 
