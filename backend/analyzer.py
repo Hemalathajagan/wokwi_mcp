@@ -1411,11 +1411,13 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
             continue
 
         if f.get("_source") == "ai":
-            title = f.get("title", "").lower()
-            explanation = f.get("explanation", "").lower()
+            title = str(f.get("title", "")).lower()
+            explanation = str(f.get("explanation", "")).lower()
             fix_desc = str(f.get("fix", {}).get("description", "")).lower()
             full_text = title + " " + explanation + " " + fix_desc
             component = f.get("component", "")
+            if isinstance(component, list):
+                component = component[0] if component else ""
             comp_lower = component.lower()
             category = f.get("category", "")
 
@@ -1448,7 +1450,7 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
     seen_titles: set[str] = set()
     unique_faults: list[dict] = []
     for f in filtered:
-        title = f.get("title", "").strip().lower()
+        title = str(f.get("title", "")).strip().lower()
         if title not in seen_titles:
             seen_titles.add(title)
             unique_faults.append(f)
