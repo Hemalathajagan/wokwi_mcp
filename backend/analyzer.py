@@ -1536,6 +1536,7 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
                     "misuse of servo",
                     "servo library misuse",
                     "potential misuse",
+                    "power supply issue",  # duplicate of power-category fault
                 )
                 if "servo" in full_text and any(kw in title for kw in _servo_code_kws):
                     continue
