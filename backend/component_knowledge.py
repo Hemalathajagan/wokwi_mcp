@@ -659,9 +659,10 @@ LIBRARY_KNOWLEDGE = {
             "Missing lcd.begin(16, 2) in setup() — display won't initialize",
             "Wrong pin order in constructor: LiquidCrystal(rs, en, d4, d5, d6, d7)",
             "Using setCursor(col, row) with wrong order — it's (column, row), not (row, column)",
+            "setCursor row out of bounds — on a 16x2 LCD valid rows are 0 and 1 only; setCursor(col, 2) writes to a non-existent row and the text is invisible",
             "Calling print() without setCursor() — text appears at last cursor position",
         ],
-        "notes": "For I2C LCD (most common on Wokwi), use LiquidCrystal_I2C library instead.",
+        "notes": "LiquidCrystal.h is for direct (parallel) 4-bit or 8-bit wiring using pins RS, E, D4-D7. This is valid and correct — do NOT flag it as wrong for not using I2C. For I2C backpack wiring, use LiquidCrystal_I2C library instead.",
     },
     "LiquidCrystal_I2C": {
         "header": "LiquidCrystal_I2C.h",
@@ -813,15 +814,14 @@ LIBRARY_KNOWLEDGE = {
     "Keypad": {
         "header": "Keypad.h",
         "related_components": ["wokwi-membrane-keypad"],
-        "required_init": "Keypad(makeKeymap(keys), rowPins, colPins, numRows, numCols) — variable names for numRows/numCols can be anything (ROWS, COLS, KEYPAD_ROWS, KEYPAD_COLS, etc.)",
+        "required_init": "Keypad(makeKeymap(keys), rowPins, colPins, numRows, numCols) — variable names can be anything (ROWS, COLS, KEYPAD_ROWS, KEYPAD_COLS, etc.); if makeKeymap() is present, initialization is correct",
         "common_functions": ["getKey", "getKeys", "waitForKey", "addEventListener", "setHoldTime", "setDebounceTime"],
         "common_mistakes": [
             "Wrong row/column pin mapping — verify which pins connect to rows vs columns",
             "Key map array doesn't match physical layout — rows and columns swapped",
             "Only checking getKey() once per loop — returns NO_KEY if not pressed at that exact moment",
-            "Using pins with pull-ups/pull-downs that interfere with keypad matrix scanning",
         ],
-        "notes": "4x4 keypad needs 8 pins. For fewer pins, consider I2C keypad expander.",
+        "notes": "4x4 keypad needs 8 pins. Analog pins (A0-A3) used as digital inputs for columns is valid and standard — do NOT flag this as a signal issue.",
     },
 }
 

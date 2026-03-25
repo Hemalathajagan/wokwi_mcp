@@ -1580,6 +1580,53 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
                 if is_servo_context and any(kw in title for kw in _servo_misc_kws):
                     continue
 
+                # D. Single-servo power draw — rule checker is authoritative for
+                #    current draw.  1 servo (~200mA) is within the Arduino 5V
+                #    pin's 500mA limit.  AI over-reports for any servo on 5V.
+                if (is_servo_comp and category == "power" and
+                        any(kw in full_text for kw in (
+                            "current draw", "power draw", "exceeding arduino",
+                            "exceeds arduino", "pin limit",
+                        ))):
+                    continue
+
+            # 11. Keypad correctly initialized — AI rejects variable names that
+            #     differ from the template (KEYPAD_ROWS ≠ ROWS, etc.).
+            #     makeKeymap() in code means Keypad IS initialized.
+            if ("keypad" in comp_lower and category == "code" and
+                    any(kw in title for kw in ("init", "missing", "keypad(")) and
+                    "makeKeymap" in sketch_code):
+                continue
+
+            # 12. Keypad on analog pins — using A0-A3 as digital inputs is
+            #     valid and the standard pattern for keypad column wiring.
+            if "keypad" in comp_lower and "analog" in full_text:
+                continue
+
+            # 13. LCD parallel mode is valid — LiquidCrystal.h IS the parallel
+            #     library.  Only flag a mismatch if the wrong library is used.
+            if ("lcd" in comp_lower and
+                    any(kw in full_text for kw in ("i2c", "protocol", "parallel")) and
+                    "#include <LiquidCrystal.h>" in sketch_code and
+                    "#include <LiquidCrystal_I2C.h>" not in sketch_code):
+                continue
+
+            # 14. "Wired pins never referenced" combined AI fault — rule checker
+            #     already handles per-pin detection via _extract_library_pin_usage().
+            #     AI generates this vague combined version for LiquidCrystal/
+            #     Keypad/Servo whose pins are used implicitly by constructors.
+            _lib_implicit_headers = (
+                "#include <LiquidCrystal.h>",
+                "#include <Keypad.h>",
+                "#include <Servo.h>",
+            )
+            if (category == "cross_reference" and
+                    any(kw in full_text for kw in (
+                        "never referenced", "never used in code", "wired but never",
+                    )) and
+                    any(hdr in sketch_code for hdr in _lib_implicit_headers)):
+                continue
+
         filtered.append(f)
 
     # ── Deduplicate by normalized title (case-insensitive) ───────────────────
