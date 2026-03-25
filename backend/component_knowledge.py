@@ -814,14 +814,13 @@ LIBRARY_KNOWLEDGE = {
     "Keypad": {
         "header": "Keypad.h",
         "related_components": ["wokwi-membrane-keypad"],
-        "required_init": "Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, numRows, numCols)",
         "common_functions": ["getKey", "getKeys", "waitForKey", "addEventListener", "setHoldTime", "setDebounceTime"],
         "common_mistakes": [
             "Wrong row/column pin mapping — verify which pins connect to rows vs columns",
             "Key map array doesn't match physical layout — rows and columns swapped",
             "Only checking getKey() once per loop — returns NO_KEY if not pressed at that exact moment",
         ],
-        "notes": "4x4 keypad needs 8 pins. Analog pins (A0-A3) used as digital inputs for columns is valid and standard — do NOT flag this as a signal issue.",
+        "notes": "If makeKeymap() is called in the constructor, initialization is correct regardless of variable names used for row/col count. Analog pins (A0-A3) as digital inputs for columns is valid and standard.",
     },
 }
 
@@ -837,7 +836,8 @@ def get_library_knowledge(sketch_code: str) -> str:
         # Check if this library is included in the sketch
         if f"#include <{header}>" in sketch_code or f'#include "{header}"' in sketch_code:
             lines.append(f"\n### {lib_name} ({header})")
-            lines.append(f"- Required init: `{info['required_init']}`")
+            if info.get("required_init"):
+                lines.append(f"- Required init: `{info['required_init']}`")
             lines.append(f"- Functions: {', '.join(info['common_functions'])}")
             lines.append("- Common mistakes:")
             for mistake in info["common_mistakes"]:
