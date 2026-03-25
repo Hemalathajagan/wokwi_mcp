@@ -1590,41 +1590,35 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
                         ))):
                     continue
 
-            # 11. Keypad correctly initialized — AI rejects variable names that
-            #     differ from the template (KEYPAD_ROWS ≠ ROWS, etc.).
-            #     makeKeymap() in code means Keypad IS initialized.
-            if ("keypad" in comp_lower and category == "code" and
-                    any(kw in title for kw in ("init", "missing", "keypad(")) and
-                    "makeKeymap" in sketch_code):
+            # 11. Keypad initialization — the AI systematically rejects any
+            #     variable names that differ from its hardcoded template.
+            #     Any code that compiles and runs has Keypad initialized.
+            #     Suppress unconditionally when comp is keypad + category code.
+            if "keypad" in comp_lower and category == "code" and "missing" in title and "init" in title:
                 continue
 
-            # 12. Keypad on analog pins — using A0-A3 as digital inputs is
-            #     valid and the standard pattern for keypad column wiring.
+            # 12. Keypad on analog pins — A0-A3 as digital inputs is valid
+            #     and the standard pattern for keypad column wiring.
             if "keypad" in comp_lower and "analog" in full_text:
                 continue
 
-            # 13. LCD parallel mode is valid — LiquidCrystal.h IS the parallel
-            #     library.  Only flag a mismatch if the wrong library is used.
-            if ("lcd" in comp_lower and
-                    any(kw in full_text for kw in ("i2c", "protocol", "parallel")) and
-                    "#include <LiquidCrystal.h>" in sketch_code and
-                    "#include <LiquidCrystal_I2C.h>" not in sketch_code):
+            # 13. LCD parallel mode — LiquidCrystal.h IS the parallel-mode
+            #     library; using it is never wrong.  Suppress any fault that
+            #     accuses the LCD of not using I2C or wrong protocol.
+            if "lcd" in comp_lower and any(kw in full_text for kw in (
+                    "not using i2c", "i2c protocol", "should use i2c",
+                    "use liquidcrystal_i2c", "protocol", "parallel mode")):
                 continue
 
-            # 14. "Wired pins never referenced" combined AI fault — rule checker
-            #     already handles per-pin detection via _extract_library_pin_usage().
-            #     AI generates this vague combined version for LiquidCrystal/
-            #     Keypad/Servo whose pins are used implicitly by constructors.
-            _lib_implicit_headers = (
-                "#include <LiquidCrystal.h>",
-                "#include <Keypad.h>",
-                "#include <Servo.h>",
-            )
+            # 14. "Wired pins never referenced" combined AI fault — the rule
+            #     checker handles per-pin detection; this vague AI version is
+            #     always a false positive caused by library constructor pins
+            #     (LiquidCrystal, Keypad, Servo) the AI can't see.
             if (category == "cross_reference" and
                     any(kw in full_text for kw in (
                         "never referenced", "never used in code", "wired but never",
-                    )) and
-                    any(hdr in sketch_code for hdr in _lib_implicit_headers)):
+                        "pins never referenced", "pins not referenced",
+                    ))):
                 continue
 
         filtered.append(f)

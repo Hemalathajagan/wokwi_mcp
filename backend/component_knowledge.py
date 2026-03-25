@@ -814,7 +814,7 @@ LIBRARY_KNOWLEDGE = {
     "Keypad": {
         "header": "Keypad.h",
         "related_components": ["wokwi-membrane-keypad"],
-        "required_init": "Keypad(makeKeymap(keys), rowPins, colPins, numRows, numCols) — variable names can be anything (ROWS, COLS, KEYPAD_ROWS, KEYPAD_COLS, etc.); if makeKeymap() is present, initialization is correct",
+        "required_init": "Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, numRows, numCols)",
         "common_functions": ["getKey", "getKeys", "waitForKey", "addEventListener", "setHoldTime", "setDebounceTime"],
         "common_mistakes": [
             "Wrong row/column pin mapping — verify which pins connect to rows vs columns",
