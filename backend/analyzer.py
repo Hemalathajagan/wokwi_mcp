@@ -1492,53 +1492,54 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
             #   • assuming Uno servo/pin limits on a Mega
             #
             # Helper: does the component field refer to a servo?
-            def _is_servo_ref(comp, comp_low):
-                if comp in servo_ids_set:
-                    return True
-                if any(sid in comp for sid in servo_ids_set):
-                    return True
-                return "servo" in comp_low
-
+            # ── Comprehensive servo suppression ──────────────────────────────
+            # Principle: the rule checker is authoritative for servo wiring.
+            # When it finds no problems, AI faults about those servos are
+            # hallucinations — caused by inability to parse loop-based
+            # attach() calls, daisy-chained V+/GND rings, or wrong board
+            # assumptions.  Instead of patching individual phrasings, we
+            # suppress by category + component type so new phrasings are
+            # caught automatically.
             if servo_ids_set:
-                is_servo = _is_servo_ref(component, comp_lower)
+                # Is the component field servo-named?
+                is_servo_comp = (
+                    component in servo_ids_set or
+                    any(sid in component for sid in servo_ids_set) or
+                    "servo" in comp_lower          # "Servo Pins", "NUM_SERVOS", etc.
+                )
+                # Is servo mentioned anywhere in the fault text?
+                is_servo_context = is_servo_comp or "servo" in full_text
 
-                # A. Wiring/signal/cross_reference fault on a confirmed-connected
-                #    servo → rule checker already cleared it.
-                if (is_servo and
-                        category in ("wiring", "signal", "cross_reference") and
-                        component in confirmed_connected_ids):
+                # A. ANY wiring / signal / cross_reference fault whose component
+                #    is servo-named is suppressed unconditionally.  The rule
+                #    checker already validated servo wiring; the AI cannot
+                #    parse loop-based attach() and invents new phrasings every
+                #    call ("mismatch", "not referenced correctly", "pins not
+                #    referenced", "wiring mismatch for servo control", …).
+                if is_servo_comp and category in ("wiring", "signal", "cross_reference"):
                     continue
 
-                # B. V+ daisy-chaining misread as a loop or connection issue.
-                if is_servo and ("v+" in title or
-                        ("connection issue" in title and "v" in title)):
-                    continue
-
-                # C. Servo count limits — AI confuses Mega (48 servos) with Uno.
+                # B. Servo count limits — Mega supports up to 48 servos; AI
+                #    assumes Uno limits.
                 _servo_count_kws = (
                     "exceeding maximum servo", "maximum servo count",
                     "servo count exceeded", "too many servos",
                     "excessive servo count", "servo limit",
                 )
-                if (any(kw in full_text for kw in _servo_count_kws) and
-                        board_type in _many_pin_boards):
+                if (is_servo_context and board_type in _many_pin_boards and
+                        any(kw in full_text for kw in _servo_count_kws)):
                     continue
 
-                # D. Code/wiring pattern faults — AI cannot follow loop-based
-                #    attach() calls, so any "mismatch", "not referenced",
-                #    "unused pin" claim for a servo context is suppressed.
-                _servo_code_kws = (
-                    "mismatch",           # catches all mismatch phrasings
-                    "not properly referenced",
-                    "pins not properly",
-                    "unused pin reference",
-                    "pin not wired",
-                    "misuse of servo",
-                    "servo library misuse",
-                    "potential misuse",
-                    "power supply issue",  # duplicate of power-category fault
+                # C. Misc faults in servo context where the component is not a
+                #    servo ID (e.g. "N/A", "pin 53") but the fault is about
+                #    servos — unused pins, library misuse, redundant power
+                #    supply warnings.
+                _servo_misc_kws = (
+                    "unused pin",
+                    "misuse",
+                    "power supply issue",
                 )
-                if "servo" in full_text and any(kw in title for kw in _servo_code_kws):
+                if is_servo_context and any(kw in title for kw in _servo_misc_kws):
                     continue
 
         filtered.append(f)
