@@ -264,13 +264,31 @@ COMPONENT_PINS = {
     },
     "wokwi-lcd1602": {
         "pins": {
+            # I2C backpack mode
             "GND": {"type": "ground_in"},
             "VCC": {"type": "power_in"},
             "SDA": {"type": "i2c_data"},
             "SCL": {"type": "i2c_clock"},
+            # Direct parallel mode
+            "VSS": {"type": "ground_in"},
+            "VDD": {"type": "power_in"},
+            "V0":  {"type": "analog_in"},   # contrast
+            "RS":  {"type": "digital_in"},
+            "RW":  {"type": "digital_in"},
+            "E":   {"type": "digital_in"},
+            "D0":  {"type": "digital_io"},
+            "D1":  {"type": "digital_io"},
+            "D2":  {"type": "digital_io"},
+            "D3":  {"type": "digital_io"},
+            "D4":  {"type": "digital_io"},
+            "D5":  {"type": "digital_io"},
+            "D6":  {"type": "digital_io"},
+            "D7":  {"type": "digital_io"},
+            "A":   {"type": "power_in"},    # backlight anode
+            "K":   {"type": "ground_in"},   # backlight cathode
         },
         "requires_power": True,
-        "protocol": "i2c",
+        "protocol": "parallel_or_i2c",
         "i2c_address": "0x27",
     },
     "wokwi-buzzer": {
@@ -628,10 +646,9 @@ LIBRARY_KNOWLEDGE = {
         "common_mistakes": [
             "Calling write() before attach() — servo won't move",
             "Using angle > 180 with write() — valid range is 0-180",
-            "Not connecting servo to PWM pin (required for Servo library)",
-            "Powering servo from Arduino 5V pin — draws too much current, use external supply",
+            "Powering many servos from Arduino 5V pin — each servo draws 200-500mA; more than 1-2 servos will exceed the Arduino's 500mA limit. Use an external 5V supply for multiple servos.",
         ],
-        "notes": "Each servo uses one timer. On Uno, using Servo disables PWM on pins 9 and 10.",
+        "notes": "Servo library uses timer interrupts and works on ANY digital pin — no hardware PWM pin required. On Uno, using Servo disables analogWrite() on pins 9 and 10.",
     },
     "LiquidCrystal": {
         "header": "LiquidCrystal.h",
@@ -796,7 +813,7 @@ LIBRARY_KNOWLEDGE = {
     "Keypad": {
         "header": "Keypad.h",
         "related_components": ["wokwi-membrane-keypad"],
-        "required_init": "Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS)",
+        "required_init": "Keypad(makeKeymap(keys), rowPins, colPins, numRows, numCols) — variable names for numRows/numCols can be anything (ROWS, COLS, KEYPAD_ROWS, KEYPAD_COLS, etc.)",
         "common_functions": ["getKey", "getKeys", "waitForKey", "addEventListener", "setHoldTime", "setDebounceTime"],
         "common_mistakes": [
             "Wrong row/column pin mapping — verify which pins connect to rows vs columns",

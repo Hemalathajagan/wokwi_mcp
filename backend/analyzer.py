@@ -532,6 +532,43 @@ def _extract_defines_and_constants(sketch_code: str) -> dict:
     return assignments
 
 
+def _extract_library_pin_usage(sketch_code: str, defines: dict) -> set[str]:
+    """Extract pins used implicitly by library constructors/arrays not caught by _extract_pin_usage_from_code.
+
+    Detects:
+      - LiquidCrystal lcd(rs, en, d4, d5, d6, d7) — all numeric/symbolic args
+      - rowPins[N] = {5, 4, 3, 2} / colPins[N] = {A3, A2, A1, A0} — Keypad arrays
+      - servo.attach(pin) — Servo library
+    """
+    pins: set[str] = set()
+
+    def _resolve(arg: str) -> str:
+        arg = arg.strip()
+        return defines.get(arg, arg)
+
+    # LiquidCrystal constructor: LiquidCrystal varname(arg, arg, ...)
+    for m in re.finditer(r'LiquidCrystal\s+\w+\s*\(([^)]+)\)', sketch_code):
+        for arg in m.group(1).split(','):
+            r = _resolve(arg)
+            if r.isdigit() or r.startswith('A'):
+                pins.add(r)
+
+    # Keypad row/col pin arrays: byte rowPins[N] = {5, 4, 3, 2}
+    for m in re.finditer(r'(?:row|col)Pins\s*\[.*?\]\s*=\s*\{([^}]+)\}', sketch_code, re.IGNORECASE):
+        for val in m.group(1).split(','):
+            r = _resolve(val)
+            if r.isdigit() or r.startswith('A'):
+                pins.add(r)
+
+    # servo.attach(pin) — any object
+    for m in re.finditer(r'\.attach\s*\(\s*(\w+)\s*\)', sketch_code):
+        r = _resolve(m.group(1))
+        if r.isdigit() or r.startswith('A'):
+            pins.add(r)
+
+    return pins
+
+
 def _check_code_wiring_mismatch(sketch_code: str, diagram: dict) -> list[dict]:
     """Cross-reference code pin usage against wiring."""
     faults = []
@@ -596,6 +633,7 @@ def _check_code_wiring_mismatch(sketch_code: str, diagram: dict) -> list[dict]:
     # Check: wired signal pins not used in code
     signal_wired = {p for p in wired_pins if p.isdigit() or p.startswith("A")}
     code_pins = {defines.get(ref, ref) for ref in pin_usage.keys()}
+    code_pins |= _extract_library_pin_usage(sketch_code, defines)
     for pin in signal_wired:
         if pin not in code_pins and pin not in ("GND.1", "GND.2", "GND.3", "5V", "3.3V", "VIN", "AREF", "RESET") and pin not in servo_wired_pins:
             faults.append({

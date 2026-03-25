@@ -9,12 +9,13 @@ import FaultReport from './components/FaultReport';
 import CodeView from './components/CodeView';
 import FixSuggestion from './components/FixSuggestion';
 import { analyzeProject, uploadKiCadFiles } from './api';
-import LoginPage from './auth/LoginPage';
-import ProtectedRoute from './auth/ProtectedRoute';
-import UserMenu from './auth/UserMenu';
-import ProfilePage from './pages/ProfilePage';
-import HistoryPage from './pages/HistoryPage';
-import HistoryDetailPage from './pages/HistoryDetailPage';
+// AUTH DISABLED -- uncomment below to re-enable login/signup
+// import LoginPage from './auth/LoginPage';
+// import ProtectedRoute from './auth/ProtectedRoute';
+// import UserMenu from './auth/UserMenu';
+// import ProfilePage from './pages/ProfilePage';
+// import HistoryPage from './pages/HistoryPage';
+// import HistoryDetailPage from './pages/HistoryDetailPage';
 import './App.css';
 
 function Dashboard() {
@@ -191,46 +192,25 @@ function App() {
             <h1>Circuit Analyzer</h1>
             <p className="subtitle">AI-powered circuit fault detection for Wokwi & KiCad</p>
           </div>
-          <UserMenu />
+          {/* AUTH DISABLED -- <UserMenu /> */}
         </div>
       </header>
 
       <main>
+        {/* AUTH DISABLED -- routes open without login */}
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+        </Routes>
+
+        {/* ORIGINAL (with auth) -- uncomment to re-enable login/signup:
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <Dashboard />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/profile"
-            element={
-              <ProtectedRoute>
-                <ProfilePage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/history"
-            element={
-              <ProtectedRoute>
-                <HistoryPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/history/:id"
-            element={
-              <ProtectedRoute>
-                <HistoryDetailPage />
-              </ProtectedRoute>
-            }
-          />
+          <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+          <Route path="/history" element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
+          <Route path="/history/:id" element={<ProtectedRoute><HistoryDetailPage /></ProtectedRoute>} />
         </Routes>
+        */}
       </main>
 
       <footer>
