@@ -1431,7 +1431,8 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
     _erc_conn_kws = ("unconnected", "not connected", "floating", "no-connect",
                      "open pin", "pin without", "without no-connect")
     _verify_kws = ("verify", "verification needed", "must be verified",
-                   "confirm the value", "check the value")
+                   "confirm the value", "check the value",
+                   "ensure that", "ensure the wiring", "ensure the pin")
     _serial_begin_kws = (
         "missing serial.begin", "serial.begin() missing", "no serial.begin",
         "serial not initialized", "serial not begun", "serial.begin not called",
@@ -1497,8 +1498,10 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
                     any(kw in (title + " " + explanation) for kw in _erc_conn_kws)):
                 continue
 
-            # 4. Verify-value suppression — rule checker already catches missing values
-            if any(kw in (title + " " + explanation) for kw in _verify_kws):
+            # 4. Verify-value suppression — rule checker already catches missing values.
+            #    Check full_text (includes fix description) since "verify" often
+            #    appears in the fix rather than the title/explanation.
+            if any(kw in full_text for kw in _verify_kws):
                 continue
 
             # 5. GND connection issue on a non-GND component — AI picks one
@@ -1595,6 +1598,26 @@ def _build_report(diagram: dict, sketch_code: str, faults: list[dict]) -> dict:
             #     Any code that compiles and runs has Keypad initialized.
             #     Suppress unconditionally when comp is keypad + category code.
             if "keypad" in comp_lower and category == "code" and "missing" in title and "init" in title:
+                continue
+            # Also suppress any code fault on Keypad — the rule checker does
+            # not check Keypad init; AI always gets variable names wrong.
+            if "keypad" in comp_lower and category == "code":
+                continue
+
+            # 11b. Self-contradicting faults — AI says "is correctly wired /
+            #      correctly configured" in explanation but still flags it.
+            #      If the explanation confirms correctness, suppress always.
+            if any(kw in explanation for kw in (
+                    "correctly wired", "correctly configured",
+                    "is correct", "are correct",
+                    "correctly connected", "is properly wired",
+            )):
+                continue
+
+            # 11c. LCD cross_reference pin-config faults — rule checker has
+            #      already validated LCD wiring via _check_code_wiring_mismatch
+            #      and _extract_library_pin_usage; AI version is redundant.
+            if "lcd" in comp_lower and category == "cross_reference":
                 continue
 
             # 12. Keypad on analog pins — A0-A3 as digital inputs is valid
