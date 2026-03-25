@@ -35,7 +35,8 @@ from kicad_analyzer import (
     analyze_kicad_pcb,
     suggest_kicad_fixes,
 )
-from auth import get_current_user
+# AUTH DISABLED -- uncomment below to re-enable login/signup
+# from auth import get_current_user
 from auth_routes import router as auth_router
 from history_routes import router as history_router
 from database import init_db, migrate_db, get_db
@@ -151,8 +152,7 @@ async def health():
 @app.post("/api/analyze")
 async def api_analyze(
     req: AnalyzeRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    # AUTH DISABLED -- restore to re-enable: user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Fetch a Wokwi project and perform full fault analysis."""
     try:
@@ -160,19 +160,12 @@ async def api_analyze(
         report = await full_analysis(project.diagram, project.sketch_code, design_description=req.design_description)
         report["project_id"] = project.project_id
 
-        # Save to history
-        summary = report.get("summary", {})
-        fault_count = summary.get("total", len(report.get("faults", [])))
-        entry = AnalysisHistory(
-            user_id=user.id,
-            wokwi_url=req.url,
-            project_id=project.project_id,
-            summary_json=json.dumps(summary),
-            report_json=json.dumps(report),
-            fault_count=fault_count,
-        )
-        db.add(entry)
-        await db.commit()
+        # AUTH DISABLED -- history saving disabled
+        # summary = report.get("summary", {})
+        # fault_count = summary.get("total", len(report.get("faults", [])))
+        # entry = AnalysisHistory(user_id=user.id, wokwi_url=req.url, project_id=project.project_id,
+        #     summary_json=json.dumps(summary), report_json=json.dumps(report), fault_count=fault_count)
+        # db.add(entry); await db.commit()
 
         return report
     except ValueError as e:
@@ -182,7 +175,7 @@ async def api_analyze(
 
 
 @app.post("/api/check-wiring")
-async def api_check_wiring(req: CheckWiringRequest, user: User = Depends(get_current_user)):
+async def api_check_wiring(req: CheckWiringRequest):  # AUTH DISABLED
     """Analyze diagram.json for wiring faults."""
     try:
         diagram = json.loads(req.diagram_json)
@@ -193,7 +186,7 @@ async def api_check_wiring(req: CheckWiringRequest, user: User = Depends(get_cur
 
 
 @app.post("/api/check-code")
-async def api_check_code(req: CheckCodeRequest, user: User = Depends(get_current_user)):
+async def api_check_code(req: CheckCodeRequest):  # AUTH DISABLED
     """Analyze Arduino sketch code for bugs."""
     diagram = {}
     if req.diagram_json:
@@ -206,7 +199,7 @@ async def api_check_code(req: CheckCodeRequest, user: User = Depends(get_current
 
 
 @app.post("/api/suggest-fix")
-async def api_suggest_fix(req: SuggestFixRequest, user: User = Depends(get_current_user)):
+async def api_suggest_fix(req: SuggestFixRequest):  # AUTH DISABLED
     """Generate corrected code/wiring for detected faults."""
     diagram = {}
     if req.diagram_json:
@@ -226,8 +219,7 @@ async def api_suggest_fix(req: SuggestFixRequest, user: User = Depends(get_curre
 @app.post("/api/kicad/analyze")
 async def api_kicad_analyze(
     req: KiCadAnalyzeRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    # AUTH DISABLED -- restore to re-enable: user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Analyze a KiCad project (from local path or pasted file content)."""
     try:
@@ -244,20 +236,13 @@ async def api_kicad_analyze(
 
         report = await full_kicad_analysis(project)
 
-        # Save to history
-        summary = report.get("summary", {})
-        fault_count = summary.get("total", len(report.get("faults", [])))
-        entry = AnalysisHistory(
-            user_id=user.id,
-            project_type="kicad",
-            project_name=project.project_name,
-            source_path=project.source_path,
-            summary_json=json.dumps(summary),
-            report_json=json.dumps(report),
-            fault_count=fault_count,
-        )
-        db.add(entry)
-        await db.commit()
+        # AUTH DISABLED -- history saving disabled
+        # summary = report.get("summary", {})
+        # fault_count = summary.get("total", len(report.get("faults", [])))
+        # entry = AnalysisHistory(user_id=user.id, project_type="kicad", project_name=project.project_name,
+        #     source_path=project.source_path, summary_json=json.dumps(summary),
+        #     report_json=json.dumps(report), fault_count=fault_count)
+        # db.add(entry); await db.commit()
 
         return report
     except ValueError as e:
@@ -269,8 +254,7 @@ async def api_kicad_analyze(
 @app.post("/api/kicad/check-schematic")
 async def api_kicad_check_schematic(
     req: KiCadCheckSchematicRequest,
-    user: User = Depends(get_current_user),
-):
+):  # AUTH DISABLED
     """Analyze a KiCad schematic for ERC errors."""
     try:
         project = load_from_content(schematic_content=req.schematic_content)
@@ -283,8 +267,7 @@ async def api_kicad_check_schematic(
 @app.post("/api/kicad/check-pcb")
 async def api_kicad_check_pcb(
     req: KiCadCheckPcbRequest,
-    user: User = Depends(get_current_user),
-):
+):  # AUTH DISABLED
     """Analyze a KiCad PCB layout for DRC errors."""
     try:
         project = load_from_content(
@@ -302,8 +285,7 @@ async def api_kicad_check_pcb(
 @app.post("/api/kicad/suggest-fix")
 async def api_kicad_suggest_fix(
     req: KiCadSuggestFixRequest,
-    user: User = Depends(get_current_user),
-):
+):  # AUTH DISABLED
     """Generate fix suggestions for KiCad design issues."""
     try:
         result = await suggest_kicad_fixes(
@@ -323,8 +305,7 @@ ALLOWED_KICAD_EXTENSIONS = {".kicad_sch", ".kicad_pcb", ".kicad_pro"}
 async def api_kicad_upload(
     files: list[UploadFile] = File(...),
     design_description: str = Form(""),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    # AUTH DISABLED -- restore to re-enable: user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db),
 ):
     """Upload KiCad files (.kicad_sch, .kicad_pcb, .kicad_pro) and run full analysis.
 
@@ -368,19 +349,12 @@ async def api_kicad_upload(
         )
         report = await full_kicad_analysis(project, design_description=design_description)
 
-        # Save to history
-        summary = report.get("summary", {})
-        fault_count = summary.get("total", len(report.get("faults", [])))
-        entry = AnalysisHistory(
-            user_id=user.id,
-            project_type="kicad",
-            project_name=project_name,
-            summary_json=json.dumps(summary),
-            report_json=json.dumps(report),
-            fault_count=fault_count,
-        )
-        db.add(entry)
-        await db.commit()
+        # AUTH DISABLED -- history saving disabled
+        # summary = report.get("summary", {})
+        # fault_count = summary.get("total", len(report.get("faults", [])))
+        # entry = AnalysisHistory(user_id=user.id, project_type="kicad", project_name=project_name,
+        #     summary_json=json.dumps(summary), report_json=json.dumps(report), fault_count=fault_count)
+        # db.add(entry); await db.commit()
 
         return report
     except Exception as e:
